@@ -1,0 +1,1609 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// PARADIGM EVENTOPS — relational schema
+// Tenant-aware: every top-level business entity carries companyId; child
+// entities are reached through a company-scoped parent (e.g. Project).
+// Money: Decimal(14,2). Engineering quantities: Float (metres, kg, m³, hours).
+// See docs/DATABASE_SCHEMA.md for the entity map and conventions.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum ProjectStatus {
+  LEAD
+  PLANNING
+  AWAITING_INPUTS
+  UNDER_REVIEW
+  APPROVED
+  IN_PREPARATION
+  IN_EXECUTION
+  COMPLETED
+  CANCELLED
+}
+
+enum InputStatus {
+  DRAFT
+  EXTRACTING
+  NEEDS_INFORMATION
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  REVISED
+}
+
+/// Confidence / validation state attached to data and calculations (spec §17C)
+enum DataState {
+  VERIFIED
+  CALCULATED
+  ESTIMATED
+  NEEDS_INFORMATION
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum InputMethod {
+  FORM
+  AI_CONVERSATION
+  DOCUMENT
+  IMPORT
+}
+
+enum StandardStatus {
+  APPROVED
+  PENDING
+  DEMO
+  RETIRED
+}
+
+enum ProductionCategory {
+  STAGE
+  BACKDROP
+  PODIUM
+  BOOTH
+  COUNTER
+  FURNITURE
+  DECORATIVE
+  SIGNAGE
+  CARPENTRY
+  PAINTING
+  BRANDING_INSTALL
+  FLOORING
+  OTHER
+}
+
+enum ProductionSpecKind {
+  PANEL
+  FRAME_MEMBER
+  PAINT_SURFACE
+  ACCESSORY
+}
+
+enum DrawingStatus {
+  MISSING
+  PROVIDED
+  APPROVED
+}
+
+enum MaterialCategory {
+  BOARD
+  TIMBER
+  PAINT
+  PRIMER
+  FASTENER
+  ADHESIVE
+  VINYL
+  FABRIC
+  FLOORING
+  CARPET
+  METAL
+  OTHER
+}
+
+enum EquipmentCategory {
+  LED_SCREEN
+  LED_PROCESSOR
+  MEDIA_SERVER
+  PROJECTOR
+  PROJECTION_SCREEN
+  SPEAKER
+  SOUND_SYSTEM
+  MIXING_CONSOLE
+  MICROPHONE
+  LIGHTING_FIXTURE
+  LIGHTING_CONSOLE
+  TRUSS
+  RIGGING
+  INTERPRETATION
+  HEADSET
+  CAMERA
+  RECORDING
+  NETWORK
+  CABLE
+  POWER_DISTRIBUTION
+  OTHER
+}
+
+enum Ownership {
+  OWNED
+  RENTAL
+}
+
+enum VehicleType {
+  PICKUP
+  VAN
+  MINIBUS
+  MEDIUM_TRUCK
+  LARGE_TRUCK
+  TRAILER
+  OTHER
+}
+
+enum TripDirection {
+  OUTBOUND
+  RETURN
+}
+
+enum BookingStatus {
+  REQUESTED
+  QUOTED
+  CONFIRMED
+  CANCELLED
+}
+
+enum ProcurementStatus {
+  DRAFT
+  RFQ_PREPARED
+  QUOTED
+  PENDING_APPROVAL
+  APPROVED
+  ORDERED
+  PARTIALLY_DELIVERED
+  DELIVERED
+  CANCELLED
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DELAYED
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPhase {
+  ADMIN
+  PROCUREMENT
+  PRODUCTION
+  TRANSPORT
+  SETUP
+  EVENT
+  DISMANTLE
+}
+
+enum DependencyType {
+  FS
+  SS
+  FF
+  SF
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ScheduleStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum RiskStatus {
+  IDENTIFIED
+  MONITORING
+  MITIGATED
+  TRIGGERED
+  CLOSED
+}
+
+enum CostCategory {
+  MATERIALS
+  LABOR
+  AV_EQUIPMENT
+  RENTALS
+  TRANSPORTATION
+  ACCOMMODATION
+  VENDORS
+  PRINTING
+  OPERATIONS
+  CONTINGENCY
+}
+
+enum CostBasis {
+  ACTUAL
+  APPROVED_QUOTE
+  ESTIMATE
+  PENDING_QUOTE
+  BUDGET
+}
+
+/// Technical approval of a department source record (production item, AV requirement).
+/// Owned by the submission / review / change-request workflow — never written by the planning engines.
+enum SourceApprovalStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum ChangeStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+enum ResourceType {
+  MATERIAL
+  LABOR
+  EQUIPMENT
+  VEHICLE
+  COST
+}
+
+enum ExecutionUpdateType {
+  STATUS
+  ISSUE
+  DELAY
+  PHOTO
+  INSPECTION
+  REQUIREMENT
+}
+
+enum ExtractionMethod {
+  RULE_BASED
+  AI
+  MANUAL
+}
+
+// ───────────────────────────── Tenancy & identity ─────────────────────────────
+
+model Company {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  country         String   @default("EG")
+  defaultCurrency String   @default("EGP")
+  timezone        String   @default("Africa/Cairo")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users          User[]
+  departments    Department[]
+  roles          Role[]
+  projects       Project[]
+  venues         EventVenue[]
+  documents      UploadedDocument[]
+  materialCats   MaterialCatalog[]
+  materials      Material[]
+  laborCats      LaborCategory[]
+  equipment      Equipment[]
+  vehicles       Vehicle[]
+  drivers        Driver[]
+  hotels         Hotel[]
+  vendors        Vendor[]
+  standards      CompanyStandard[]
+  calculations   CalculationRecord[]
+  approvals      Approval[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+  exchangeRates  ExchangeRate[]
+  routeEstimates RouteEstimate[]
+  historical     HistoricalEvent[]
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  companyId   String
+  key         String // SUPER_ADMIN, PROJECT_MANAGER, ...
+  name        String
+  description String?
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users       User[]
+  permissions RolePermission[]
+
+  @@unique([companyId, key])
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique // e.g. project.create, standards.manage
+  description String
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model Department {
+  id        String  @id @default(cuid())
+  companyId String
+  key       String // PRODUCTION, AV, LOGISTICS, ACCOMMODATION, CREATIVE, PROCUREMENT, ACCOUNT, PMO, FINANCE, MANAGEMENT
+  name      String
+  nameAr    String?
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  memberships        DepartmentMembership[]
+  projectDepartments ProjectDepartment[]
+  submissions        DepartmentSubmission[]
+  tasks              Task[]
+  risks              Risk[]
+  procurement        ProcurementRequest[]
+  accommodation      AccommodationAssignment[]
+
+  @@unique([companyId, key])
+}
+
+model User {
+  id             String    @id @default(cuid())
+  companyId      String
+  email          String    @unique
+  name           String
+  passwordHash   String
+  roleId         String
+  jobTitle       String?
+  phone          String?
+  employeeCode   String?
+  locale         String    @default("en")
+  active         Boolean   @default(true)
+  isDemo         Boolean   @default(false)
+  sessionVersion Int       @default(1)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  company          Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role             Role                      @relation(fields: [roleId], references: [id])
+  memberships      DepartmentMembership[]
+  projectRoles     ProjectMember[]
+  ownedProjects    Project[]                 @relation("ProjectOwner")
+  managedProjects  Project[]                 @relation("ProjectManager")
+  accountProjects  Project[]                 @relation("AccountManager")
+  deptLeads        ProjectDepartment[]
+  submissions      DepartmentSubmission[]    @relation("SubmittedBy")
+  reviews          DepartmentSubmission[]    @relation("ReviewedBy")
+  taskAssignments  TaskAssignee[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  comments         Comment[]
+  executionUpdates ExecutionUpdate[]
+  accommodation    AccommodationAssignment[]
+  uploads          UploadedDocument[]
+  riskOwnerships   Risk[]
+
+  @@index([companyId])
+}
+
+model DepartmentMembership {
+  userId       String
+  departmentId String
+  isManager    Boolean    @default(false)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, departmentId])
+}
+
+// ───────────────────────────── Projects ─────────────────────────────
+
+model EventVenue {
+  id              String       @id @default(cuid())
+  companyId       String
+  name            String
+  city            String
+  address         String?
+  accessOpens     String? // "07:00" local time — daily access window
+  accessCloses    String? // "23:00"
+  powerCapacityKw Float?
+  loadingDock     Boolean      @default(false)
+  maxVehicleType  VehicleType?
+  accessNotes     String?
+  isDemo          Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  company         Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projects        Project[]
+
+  @@index([companyId])
+}
+
+model Project {
+  id               String        @id @default(cuid())
+  companyId        String
+  code             String
+  name             String
+  client           String
+  category         String
+  location         String
+  venueId          String?
+  eventStart       DateTime
+  eventEnd         DateTime
+  setupStart       DateTime
+  setupEnd         DateTime
+  dismantleStart   DateTime?
+  dismantleEnd     DateTime?
+  participants     Int
+  status           ProjectStatus @default(PLANNING)
+  budgetAmount     Decimal?      @db.Decimal(14, 2)
+  currency         String        @default("EGP")
+  description      String?
+  ownerId          String?
+  projectManagerId String?
+  accountManagerId String?
+  planVersion      Int           @default(0)
+  isDemo           Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
+
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  venue          EventVenue? @relation(fields: [venueId], references: [id])
+  owner          User?       @relation("ProjectOwner", fields: [ownerId], references: [id])
+  projectManager User?       @relation("ProjectManager", fields: [projectManagerId], references: [id])
+  accountManager User?       @relation("AccountManager", fields: [accountManagerId], references: [id])
+
+  members          ProjectMember[]
+  departments      ProjectDepartment[]
+  requirements     EventRequirement[]
+  submissions      DepartmentSubmission[]
+  documents        UploadedDocument[]
+  productionItems  ProductionItem[]
+  materialCalcs    MaterialCalculation[]
+  cuttingPlans     CuttingPlan[]
+  laborAssignments LaborAssignment[]
+  equipmentReqs    EquipmentRequirement[]
+  resourceAssigns  ResourceAssignment[]
+  vehicleAssigns   VehicleAssignment[]
+  cargo            CargoItem[]
+  accommodation    AccommodationAssignment[]
+  brandingItems    BrandingItem[]
+  procurement      ProcurementRequest[]
+  quotes           VendorQuote[]
+  tasks            Task[]
+  scheduleVersions ScheduleVersion[]
+  risks            Risk[]
+  budgets          ProjectBudget[]
+  costItems        CostItem[]
+  calculations     CalculationRecord[]
+  approvals        Approval[]
+  changes          ProjectChange[]
+  actuals          ActualConsumption[]
+  executionUpdates ExecutionUpdate[]
+  notifications    Notification[]
+  scenarios        ScenarioSimulation[]
+  comments         Comment[]
+  auditLogs        AuditLog[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  role      String // free text: "Production lead", "AV technician"...
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+}
+
+/// A department participating in a project (assigned by the Project Manager)
+model ProjectDepartment {
+  id           String      @id @default(cuid())
+  projectId    String
+  departmentId String
+  leadId       String?
+  status       InputStatus @default(DRAFT)
+  dueDate      DateTime?
+  notes        String?
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  department   Department  @relation(fields: [departmentId], references: [id])
+  lead         User?       @relation(fields: [leadId], references: [id])
+
+  @@unique([projectId, departmentId])
+}
+
+model EventRequirement {
+  id          String      @id @default(cuid())
+  projectId   String
+  category    String
+  title       String
+  description String?
+  quantity    Float?
+  unit        String?
+  status      InputStatus @default(SUBMITTED)
+  createdAt   DateTime    @default(now())
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ───────────────────────────── Department input engine ─────────────────────────────
+
+model DepartmentSubmission {
+  id            String      @id @default(cuid())
+  projectId     String
+  departmentId  String
+  submittedById String
+  reviewerId    String?
+  title         String
+  method        InputMethod @default(FORM)
+  status        InputStatus @default(DRAFT)
+  rawText       String?
+  extracted     Json? // structured draft extracted by rule-based/AI engines
+  missingFields Json? // [{field,label,question}]
+  formStep      Int         @default(1)
+  reviewNote    String?
+  version       Int         @default(1)
+  submittedAt   DateTime?
+  reviewedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  project         Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  department      Department             @relation(fields: [departmentId], references: [id])
+  submittedBy     User                   @relation("SubmittedBy", fields: [submittedById], references: [id])
+  reviewer        User?                  @relation("ReviewedBy", fields: [reviewerId], references: [id])
+  fields          SubmissionField[]
+  documents       UploadedDocument[]
+  productionItems ProductionItem[]
+  equipmentReqs   EquipmentRequirement[]
+
+  @@index([projectId, departmentId])
+  @@index([status])
+}
+
+model SubmissionField {
+  id               String               @id @default(cuid())
+  submissionId     String
+  key              String
+  label            String
+  value            String?
+  unit             String?
+  state            DataState            @default(ESTIMATED)
+  method           ExtractionMethod     @default(MANUAL)
+  isAssumption     Boolean              @default(false)
+  sourceDocumentId String?
+  sourcePage       Int?
+  sourceSnippet    String?
+  submission       DepartmentSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+}
+
+model UploadedDocument {
+  id           String      @id @default(cuid())
+  companyId    String
+  projectId    String?
+  submissionId String?
+  uploadedById String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String      @unique
+  sha256       String
+  category     String      @default("GENERAL") // DRAWING, SPEC, QUOTE, PHOTO, ARTWORK, BOQ...
+  status       InputStatus @default(SUBMITTED)
+  textPreview  String?
+  createdAt    DateTime    @default(now())
+  deletedAt    DateTime?
+
+  company    Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project    Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  submission DepartmentSubmission?   @relation(fields: [submissionId], references: [id])
+  uploadedBy User                    @relation(fields: [uploadedById], references: [id])
+  extracted  ExtractedDocumentData[]
+
+  @@index([companyId, projectId])
+}
+
+model ExtractedDocumentData {
+  id           String           @id @default(cuid())
+  documentId   String
+  page         Int?
+  field        String
+  value        String
+  unit         String?
+  snippet      String?
+  method       ExtractionMethod
+  state        DataState        @default(UNDER_REVIEW)
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  document     UploadedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+// ───────────────────────────── Production & materials ─────────────────────────────
+
+model ProductionItem {
+  id                          String               @id @default(cuid())
+  projectId                   String
+  submissionId                String?
+  code                        String
+  name                        String
+  category                    ProductionCategory
+  quantity                    Int                  @default(1)
+  widthM                      Float?
+  heightM                     Float?
+  depthM                      Float?
+  boardMaterialId             String?
+  finishing                   String?
+  color                       String?
+  paintCoats                  Int?
+  constructionMethod          String?
+  installationMethod          String?
+  installationDay             Int? // 1-based setup day
+  installHoursEst             Float?
+  packedVolumeM3              Float? // knocked-down transport volume entered by Production
+  packedWeightKg              Float? // optional measured transport weight
+  specialTools                String?
+  notes                       String?
+  drawingStatus               DrawingStatus        @default(MISSING)
+  /// Calculation state written by the planning engines (CALCULATED / ESTIMATED / NEEDS_INFORMATION).
+  calculationState            DataState            @default(NEEDS_INFORMATION) @map("state")
+  /// Technical approval — only the submission/review/change-request workflow writes this.
+  approvalStatus              SourceApprovalStatus @default(DRAFT)
+  engineeringApprovalRequired Boolean              @default(false)
+  engineeringApprovedBy       String?
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+
+  project       Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  submission    DepartmentSubmission?     @relation(fields: [submissionId], references: [id])
+  boardMaterial Material?                 @relation("ItemBoard", fields: [boardMaterialId], references: [id])
+  specs         ProductionSpecification[]
+  materialCalcs MaterialCalculation[]
+
+  @@unique([projectId, code])
+}
+
+/// Drawing-derived components: panels to cut, frame members, paint surfaces, accessories.
+/// Timber and boards are only calculated from these approved components — never invented.
+model ProductionSpecification {
+  id               String             @id @default(cuid())
+  productionItemId String
+  kind             ProductionSpecKind
+  label            String
+  materialId       String?
+  lengthM          Float?
+  widthM           Float?
+  quantity         Int                @default(1)
+  sides            Int                @default(1) // paint: faces painted
+  coats            Int?
+  drawingRef       String? // e.g. "DWG-BD-01 rev B, sheet 2"
+  notes            String?
+  productionItem   ProductionItem     @relation(fields: [productionItemId], references: [id], onDelete: Cascade)
+  material         Material?          @relation(fields: [materialId], references: [id])
+
+  @@index([productionItemId])
+}
+
+model MaterialCatalog {
+  id        String           @id @default(cuid())
+  companyId String
+  name      String
+  category  MaterialCategory
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  materials Material[]
+
+  @@unique([companyId, name])
+}
+
+model Material {
+  id              String           @id @default(cuid())
+  companyId       String
+  catalogId       String?
+  code            String
+  name            String
+  category        MaterialCategory
+  unit            String // sheet, piece, litre, box, m, m2, kg
+  stockLengthM    Float? // board length / timber stock length
+  stockWidthM     Float? // board width
+  thicknessMm     Float?
+  weightPerUnitKg Float?
+  coverageM2PerL  Float? // paints/primers
+  wasteFactorPct  Float            @default(0)
+  kerfMm          Float?
+  edgeTrimMm      Float?
+  grainDirection  Boolean          @default(false)
+  unitCost        Decimal?         @db.Decimal(14, 2)
+  currency        String           @default("EGP")
+  supplierId      String?
+  stockQty        Float?
+  status          StandardStatus   @default(DEMO)
+  isDemo          Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  company      Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  catalog      MaterialCatalog?          @relation(fields: [catalogId], references: [id])
+  supplier     Vendor?                   @relation(fields: [supplierId], references: [id])
+  boardItems   ProductionItem[]          @relation("ItemBoard")
+  specs        ProductionSpecification[]
+  calculations MaterialCalculation[]
+  cuttingPlans CuttingPlan[]
+  procurement  ProcurementRequest[]
+  actuals      ActualConsumption[]
+
+  @@unique([companyId, code])
+}
+
+model MaterialCalculation {
+  id               String    @id @default(cuid())
+  projectId        String
+  productionItemId String?
+  materialId       String
+  netQuantity      Float
+  wastePct         Float
+  grossQuantity    Float
+  purchaseQuantity Float // rounded to purchasable units
+  unit             String
+  method           String
+  state            DataState @default(CALCULATED)
+  calculationId    String?
+  createdAt        DateTime  @default(now())
+
+  project        Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productionItem ProductionItem?    @relation(fields: [productionItemId], references: [id], onDelete: Cascade)
+  material       Material           @relation(fields: [materialId], references: [id])
+  calculation    CalculationRecord? @relation(fields: [calculationId], references: [id])
+
+  @@index([projectId])
+}
+
+model CuttingPlan {
+  id             String   @id @default(cuid())
+  projectId      String
+  materialId     String
+  boardsUsed     Int
+  utilizationPct Float
+  kerfMm         Float
+  layout         Json // [{board, placements:[{label,x,y,w,h,rotated}]}]
+  unplaced       Json? // panels that do not fit a board
+  calculationId  String?
+  createdAt      DateTime @default(now())
+
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  material    Material           @relation(fields: [materialId], references: [id])
+  calculation CalculationRecord? @relation(fields: [calculationId], references: [id])
+
+  @@index([projectId])
+}
+
+// ───────────────────────────── Labor ─────────────────────────────
+
+model LaborCategory {
+  id                 String            @id @default(cuid())
+  companyId          String
+  key                String // CARPENTER, PAINTER, ...
+  name               String
+  nameAr             String?
+  dailyHours         Float             @default(8)
+  breakHours         Float             @default(1)
+  maxOvertimeHours   Float             @default(2)
+  dailyRate          Decimal?          @db.Decimal(14, 2)
+  overtimeHourlyRate Decimal?          @db.Decimal(14, 2)
+  currency           String            @default("EGP")
+  headcountAvailable Int               @default(0)
+  skillLevel         String?
+  location           String?
+  teamLeader         String?
+  status             StandardStatus    @default(DEMO)
+  company            Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rates              LaborRate[]
+  assignments        LaborAssignment[]
+  tasks              Task[]
+
+  @@unique([companyId, key])
+}
+
+/// Productivity standard: hours of this trade per unit of work for an activity.
+model LaborRate {
+  id              String         @id @default(cuid())
+  laborCategoryId String
+  activity        String // BOARD_FABRICATION, FRAME_ASSEMBLY, PAINTING, INSTALL_STRUCTURE...
+  unitOfWork      String // m2, piece, m, unit
+  hoursPerUnit    Float
+  status          StandardStatus @default(DEMO)
+  source          String?
+  approvedById    String?
+  approvedAt      DateTime?
+  laborCategory   LaborCategory  @relation(fields: [laborCategoryId], references: [id], onDelete: Cascade)
+
+  @@unique([laborCategoryId, activity])
+}
+
+model LaborAssignment {
+  id              String        @id @default(cuid())
+  projectId       String
+  taskId          String?
+  laborCategoryId String
+  workDate        DateTime
+  crewSize        Int
+  hours           Float
+  overtimeHours   Float         @default(0)
+  status          String        @default("PLANNED")
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task            Task?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  laborCategory   LaborCategory @relation(fields: [laborCategoryId], references: [id])
+
+  @@index([projectId])
+  @@index([laborCategoryId, workDate])
+}
+
+// ───────────────────────────── AV & equipment ─────────────────────────────
+
+model Equipment {
+  id                  String                 @id @default(cuid())
+  companyId           String
+  code                String
+  category            EquipmentCategory
+  model               String
+  manufacturer        String?
+  specs               Json?
+  widthM              Float?
+  heightM             Float?
+  depthM              Float?
+  weightKg            Float?
+  caseVolumeM3        Float? // packed (flight-case) volume per unit
+  powerW              Float?
+  connectionType      String?
+  setupMinutes        Float?
+  techniciansRequired Float?
+  rentalDailyRate     Decimal?               @db.Decimal(14, 2)
+  currency            String                 @default("EGP")
+  ownership           Ownership              @default(OWNED)
+  status              StandardStatus         @default(DEMO)
+  isDemo              Boolean                @default(false)
+  company             Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  inventory           EquipmentInventory[]
+  requirements        EquipmentRequirement[]
+
+  @@unique([companyId, code])
+}
+
+model EquipmentInventory {
+  id           String    @id @default(cuid())
+  equipmentId  String
+  location     String
+  quantity     Int
+  outOfService Int       @default(0)
+  condition    String?
+  equipment    Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([equipmentId, location])
+}
+
+model EquipmentRequirement {
+  id               String                @id @default(cuid())
+  projectId        String
+  submissionId     String?
+  equipmentId      String?
+  category         EquipmentCategory
+  description      String
+  quantity         Int
+  backupQuantity   Int                   @default(0)
+  specs            String?
+  allocatedQty     Int                   @default(0)
+  rentalQty        Int                   @default(0)
+  /// Calculation state written by the planning engines.
+  calculationState DataState             @default(NEEDS_INFORMATION) @map("state")
+  /// Technical approval — only the submission/review/change-request workflow writes this.
+  approvalStatus   SourceApprovalStatus  @default(DRAFT)
+  notes            String?
+  createdAt        DateTime              @default(now())
+  project          Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  submission       DepartmentSubmission? @relation(fields: [submissionId], references: [id])
+  equipment        Equipment?            @relation(fields: [equipmentId], references: [id])
+
+  @@index([projectId])
+}
+
+/// Time-bound allocation of a shared resource (equipment/vehicle/labor) to a project.
+/// Used for cross-project double-booking detection.
+model ResourceAssignment {
+  id           String       @id @default(cuid())
+  projectId    String
+  resourceType ResourceType
+  resourceId   String
+  taskId       String?
+  quantity     Float        @default(1)
+  startAt      DateTime
+  endAt        DateTime
+  status       String       @default("PLANNED")
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([resourceType, resourceId, startAt])
+}
+
+// ───────────────────────────── Logistics ─────────────────────────────
+
+model Vehicle {
+  id                String              @id @default(cuid())
+  companyId         String
+  code              String
+  type              VehicleType
+  description       String?
+  payloadKg         Float
+  volumeM3          Float
+  internalLengthM   Float?
+  internalWidthM    Float?
+  internalHeightM   Float?
+  dailyCost         Decimal?            @db.Decimal(14, 2)
+  currency          String              @default("EGP")
+  ownership         Ownership           @default(OWNED)
+  location          String?
+  maintenanceStatus String              @default("OK")
+  available         Boolean             @default(true)
+  isDemo            Boolean             @default(false)
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignments       VehicleAssignment[]
+
+  @@unique([companyId, code])
+}
+
+model Driver {
+  id          String              @id @default(cuid())
+  companyId   String
+  name        String
+  phone       String?
+  licenseType String?
+  available   Boolean             @default(true)
+  isDemo      Boolean             @default(false)
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignments VehicleAssignment[]
+}
+
+model RouteEstimate {
+  id            String   @id @default(cuid())
+  companyId     String
+  origin        String
+  destination   String
+  distanceKm    Float?
+  durationHours Float?
+  source        String // "Approved by Logistics Manager", "Actual trip 2026-03"
+  approved      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, origin, destination])
+}
+
+model VehicleAssignment {
+  id             String        @id @default(cuid())
+  projectId      String
+  vehicleId      String
+  driverId       String?
+  tripLabel      String
+  direction      TripDirection @default(OUTBOUND)
+  departureAt    DateTime?
+  arrivalAt      DateTime?
+  loadedWeightKg Float         @default(0)
+  loadedVolumeM3 Float         @default(0)
+  isBackup       Boolean       @default(false)
+  status         String        @default("PLANNED")
+  calculationId  String?
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vehicle        Vehicle       @relation(fields: [vehicleId], references: [id])
+  driver         Driver?       @relation(fields: [driverId], references: [id])
+  cargo          CargoItem[]
+
+  @@index([projectId])
+}
+
+model CargoItem {
+  id                  String             @id @default(cuid())
+  projectId           String
+  sourceType          String // PRODUCTION | EQUIPMENT | PRINT | OTHER
+  sourceId            String?
+  name                String
+  quantity            Int                @default(1)
+  lengthM             Float?
+  widthM              Float?
+  heightM             Float?
+  unitWeightKg        Float?
+  unitVolumeM3        Float?
+  fragile             Boolean            @default(false)
+  stackable           Boolean            @default(true)
+  handlingNotes       String?
+  priority            Priority           @default(MEDIUM)
+  destination         String?
+  loadMinutes         Float?
+  unloadMinutes       Float?
+  vehicleAssignmentId String?
+  state               DataState          @default(ESTIMATED)
+  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vehicleAssignment   VehicleAssignment? @relation(fields: [vehicleAssignmentId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+}
+
+// ───────────────────────────── Accommodation ─────────────────────────────
+
+model Hotel {
+  id          String                    @id @default(cuid())
+  companyId   String
+  name        String
+  city        String
+  address     String?
+  stars       Int?
+  contact     String?
+  isDemo      Boolean                   @default(false)
+  company     Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  roomTypes   RoomType[]
+  assignments AccommodationAssignment[]
+}
+
+model RoomType {
+  id             String                    @id @default(cuid())
+  hotelId        String
+  name           String
+  capacity       Int
+  nightlyRate    Decimal?                  @db.Decimal(14, 2)
+  currency       String                    @default("EGP")
+  roomsAvailable Int?
+  hotel          Hotel                     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  assignments    AccommodationAssignment[]
+}
+
+model AccommodationAssignment {
+  id              String        @id @default(cuid())
+  projectId       String
+  userId          String?
+  guestName       String?
+  employeeCode    String?
+  departmentId    String?
+  jobRole         String?
+  hotelId         String?
+  roomTypeId      String?
+  roomLabel       String? // sharing group key: guests with the same label share a room
+  sharedRoom      Boolean       @default(false)
+  arrivalDate     DateTime?
+  checkIn         DateTime?
+  checkOut        DateTime?
+  specialRequests String?
+  bookingStatus   BookingStatus @default(REQUESTED)
+  confirmationRef String?
+  createdAt       DateTime      @default(now())
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user            User?         @relation(fields: [userId], references: [id])
+  department      Department?   @relation(fields: [departmentId], references: [id])
+  hotel           Hotel?        @relation(fields: [hotelId], references: [id])
+  roomType        RoomType?     @relation(fields: [roomTypeId], references: [id])
+
+  @@index([projectId])
+}
+
+// ───────────────────────────── Creative & branding ─────────────────────────────
+
+model BrandingItem {
+  id                     String         @id @default(cuid())
+  projectId              String
+  name                   String
+  artworkDocumentId      String?
+  widthM                 Float?
+  heightM                Float?
+  quantity               Int?
+  material               String?
+  printMethod            String?
+  finishing              String?
+  installationMethod     String?
+  vendorId               String?
+  leadTimeDays           Int?
+  clientApprovalDeadline DateTime?
+  productionDeadline     DateTime?
+  deliveryDeadline       DateTime?
+  approvalStatus         ApprovalStatus @default(PENDING)
+  unitCost               Decimal?       @db.Decimal(14, 2)
+  currency               String         @default("EGP")
+  state                  DataState      @default(NEEDS_INFORMATION)
+  createdAt              DateTime       @default(now())
+  project                Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vendor                 Vendor?        @relation(fields: [vendorId], references: [id])
+
+  @@index([projectId])
+}
+
+// ───────────────────────────── Procurement & vendors ─────────────────────────────
+
+model Vendor {
+  id           String               @id @default(cuid())
+  companyId    String
+  name         String
+  contactName  String?
+  phone        String?
+  email        String?
+  location     String?
+  services     String[]
+  leadTimeDays Int?
+  status       StandardStatus       @default(DEMO)
+  isDemo       Boolean              @default(false)
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quotes       VendorQuote[]
+  materials    Material[]
+  procurement  ProcurementRequest[]
+  branding     BrandingItem[]
+}
+
+model VendorQuote {
+  id                   String              @id @default(cuid())
+  vendorId             String
+  projectId            String?
+  procurementRequestId String?
+  item                 String
+  quantity             Float?
+  unitPrice            Decimal             @db.Decimal(14, 2)
+  currency             String              @default("EGP")
+  taxPct               Float               @default(14)
+  leadTimeDays         Int?
+  validUntil           DateTime?
+  quotedAt             DateTime            @default(now())
+  status               String              @default("RECEIVED") // RECEIVED | SELECTED | REJECTED | EXPIRED
+  documentId           String?
+  vendor               Vendor              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  project              Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  procurementRequest   ProcurementRequest? @relation(fields: [procurementRequestId], references: [id], onDelete: SetNull)
+}
+
+model ProcurementRequest {
+  id               String            @id @default(cuid())
+  projectId        String
+  departmentId     String?
+  code             String
+  item             String
+  materialId       String?
+  quantity         Float
+  unit             String
+  specifications   String?
+  requiredByDate   DateTime?
+  vendorId         String?
+  unitPrice        Decimal?          @db.Decimal(14, 2)
+  currency         String            @default("EGP")
+  taxPct           Float             @default(14)
+  status           ProcurementStatus @default(DRAFT)
+  receivedQuantity Float             @default(0)
+  calculationId    String?
+  approvedById     String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  department       Department?       @relation(fields: [departmentId], references: [id])
+  material         Material?         @relation(fields: [materialId], references: [id])
+  vendor           Vendor?           @relation(fields: [vendorId], references: [id])
+  quotes           VendorQuote[]
+
+  @@unique([projectId, code])
+}
+
+// ───────────────────────────── Planning & scheduling ─────────────────────────────
+
+model Task {
+  id               String     @id @default(cuid())
+  projectId        String
+  departmentId     String?
+  wbsCode          String
+  name             String
+  description      String?
+  phase            TaskPhase
+  assignedTeam     String?
+  laborCategoryId  String?
+  crewSize         Int?
+  laborHours       Float?
+  durationHours    Float
+  plannedStart     DateTime?
+  plannedEnd       DateTime?
+  earlyStartH      Float? // hours from schedule anchor
+  lateStartH       Float?
+  totalFloatH      Float?
+  isCritical       Boolean    @default(false)
+  isMilestone      Boolean    @default(false)
+  priority         Priority   @default(MEDIUM)
+  location         String?
+  deadline         DateTime?
+  status           TaskStatus @default(NOT_STARTED)
+  percentComplete  Float      @default(0)
+  actualStart      DateTime?
+  actualEnd        DateTime?
+  requiresApproval Boolean    @default(false)
+  sourceType       String? // PRODUCTION_ITEM | EQUIPMENT | CARGO | ACCOMMODATION | MANUAL
+  sourceId         String?
+  planKey          String?
+  generated        Boolean    @default(false)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  project          Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  department       Department?         @relation(fields: [departmentId], references: [id])
+  laborCategory    LaborCategory?      @relation(fields: [laborCategoryId], references: [id])
+  assignees        TaskAssignee[]
+  predecessors     TaskDependency[]    @relation("Successor")
+  successors       TaskDependency[]    @relation("Predecessor")
+  laborAssignments LaborAssignment[]
+  executionUpdates ExecutionUpdate[]
+  actuals          ActualConsumption[]
+
+  @@unique([projectId, wbsCode])
+  @@index([projectId, status])
+}
+
+model TaskAssignee {
+  taskId String
+  userId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, userId])
+}
+
+model TaskDependency {
+  id            String         @id @default(cuid())
+  predecessorId String
+  successorId   String
+  type          DependencyType @default(FS)
+  lagHours      Float          @default(0)
+  predecessor   Task           @relation("Predecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  successor     Task           @relation("Successor", fields: [successorId], references: [id], onDelete: Cascade)
+
+  @@unique([predecessorId, successorId])
+}
+
+model ScheduleVersion {
+  id            String         @id @default(cuid())
+  projectId     String
+  version       Int
+  label         String
+  status        ScheduleStatus @default(DRAFT)
+  method        String // CPM_SGS | ORTOOLS
+  makespanHours Float?
+  feasible      Boolean        @default(true)
+  snapshot      Json // tasks with dates
+  conflicts     Json?
+  criticalPath  Json?
+  createdById   String?
+  approvedById  String?
+  approvedAt    DateTime?
+  createdAt     DateTime       @default(now())
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, version])
+}
+
+// ───────────────────────────── Risk ─────────────────────────────
+
+model Risk {
+  id                String      @id @default(cuid())
+  projectId         String
+  departmentId      String?
+  code              String
+  title             String
+  description       String
+  probability       Int // 1..5
+  impact            Int // 1..5
+  severity          Int // computed by configured scoring rule
+  ownerId           String?
+  trigger           String?
+  warningSigns      String?
+  prevention        String?
+  immediateAction   String?
+  contingency       String? // Plan B
+  responseTimeMin   Int?
+  requiredResources String?
+  timeImpactHours   Float?
+  costImpact        Decimal?    @db.Decimal(14, 2)
+  costCurrency      String?
+  status            RiskStatus  @default(IDENTIFIED)
+  generated         Boolean     @default(false)
+  ruleKey           String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  project           Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  department        Department? @relation(fields: [departmentId], references: [id])
+  owner             User?       @relation(fields: [ownerId], references: [id])
+
+  @@unique([projectId, code])
+}
+
+// ───────────────────────────── Budget & cost ─────────────────────────────
+
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  companyId    String
+  fromCurrency String
+  toCurrency   String
+  rate         Float
+  source       String
+  rateDate     DateTime
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, fromCurrency, toCurrency])
+}
+
+model ProjectBudget {
+  id             String         @id @default(cuid())
+  projectId      String
+  currency       String
+  totalBudget    Decimal        @db.Decimal(14, 2)
+  contingencyPct Float          @default(10)
+  status         ApprovalStatus @default(PENDING)
+  approvedById   String?
+  createdAt      DateTime       @default(now())
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items          CostItem[]
+}
+
+model CostItem {
+  id            String         @id @default(cuid())
+  projectId     String
+  budgetId      String?
+  category      CostCategory
+  description   String
+  quantity      Float
+  unit          String
+  unitCost      Decimal        @db.Decimal(14, 2)
+  amount        Decimal        @db.Decimal(14, 2)
+  currency      String
+  basis         CostBasis
+  sourceType    String?
+  sourceId      String?
+  generated     Boolean        @default(false)
+  calculationId String?
+  createdAt     DateTime       @default(now())
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budget        ProjectBudget? @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, category])
+}
+
+// ───────────────────────────── Trust: provenance, approvals, history ─────────────────────────────
+
+model CalculationRecord {
+  id            String                @id @default(cuid())
+  companyId     String
+  projectId     String?
+  engine        String // production.boards, production.paint, manpower.crew, logistics.packing...
+  subjectType   String?
+  subjectId     String?
+  title         String
+  formula       String
+  inputs        Json
+  outputs       Json
+  assumptions   Json?
+  units         String?
+  engineVersion String
+  inputHash     String
+  state         DataState             @default(CALCULATED)
+  createdById   String?
+  approvedById  String?
+  createdAt     DateTime              @default(now())
+  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project       Project?              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  materialCalcs MaterialCalculation[]
+  cuttingPlans  CuttingPlan[]
+
+  @@index([projectId, engine])
+}
+
+model Approval {
+  id            String         @id @default(cuid())
+  companyId     String
+  projectId     String?
+  entityType    String // SUBMISSION | PLAN | BUDGET | PROCUREMENT | STANDARD | CHANGE | PRODUCTION_ITEM
+  entityId      String
+  title         String
+  description   String?
+  requiredRole  String // role key that may decide
+  requestedById String?
+  approverId    String?
+  status        ApprovalStatus @default(PENDING)
+  decisionNote  String?
+  decidedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project       Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([entityType, entityId])
+}
+
+model ProjectChange {
+  id            String       @id @default(cuid())
+  projectId     String
+  title         String
+  entityType    String
+  entityId      String?
+  changes       Json // [{field, from, to}]
+  impact        Json? // ChangeImpact summary
+  status        ChangeStatus @default(PROPOSED)
+  requestedById String?
+  approvedById  String?
+  createdAt     DateTime     @default(now())
+  decidedAt     DateTime?
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String
+  userId     String?
+  projectId  String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id])
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model Comment {
+  id         String   @id @default(cuid())
+  projectId  String
+  userId     String
+  entityType String   @default("PROJECT")
+  entityId   String?
+  body       String
+  createdAt  DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([projectId])
+}
+
+// ───────────────────────────── Execution & learning ─────────────────────────────
+
+model ActualConsumption {
+  id              String       @id @default(cuid())
+  projectId       String
+  taskId          String?
+  resourceType    ResourceType
+  materialId      String?
+  category        String // matches planned category key, e.g. "BOARD:MDF-18", "LABOR:CARPENTER", "VEHICLE:TRIPS"
+  description     String
+  plannedQuantity Float?
+  actualQuantity  Float
+  unit            String
+  recordedById    String?
+  note            String?
+  recordedAt      DateTime     @default(now())
+  project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task            Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  material        Material?    @relation(fields: [materialId], references: [id])
+
+  @@index([projectId])
+}
+
+model ExecutionUpdate {
+  id              String              @id @default(cuid())
+  projectId       String
+  taskId          String?
+  userId          String
+  type            ExecutionUpdateType
+  status          TaskStatus?
+  message         String
+  percentComplete Float?
+  delayMinutes    Int?
+  delayReason     String?
+  photoDocumentId String?
+  createdAt       DateTime            @default(now())
+  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task            Task?               @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  user            User                @relation(fields: [userId], references: [id])
+
+  @@index([projectId, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  companyId String
+  userId    String
+  projectId String?
+  type      String // APPROVAL | MISSING_INPUT | DEADLINE | TASK | SCHEDULE | PROCUREMENT | RISK | DELAY
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model ScenarioSimulation {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  question    String?
+  assumptions Json
+  result      Json?
+  createdById String?
+  createdAt   DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+/// Versioned company standards (working hours, risk scoring, waste defaults...).
+/// Only SUPER_ADMIN may approve; AI may only propose (status PENDING).
+model CompanyStandard {
+  id           String         @id @default(cuid())
+  companyId    String
+  key          String
+  category     String
+  label        String
+  value        Json
+  unit         String?
+  description  String?
+  status       StandardStatus @default(DEMO)
+  version      Int            @default(1)
+  proposedBy   String?
+  approvedById String?
+  approvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key, version])
+}
+
+model HistoricalEvent {
+  id             String    @id @default(cuid())
+  companyId      String
+  name           String
+  eventDate      DateTime?
+  location       String?
+  participants   Int?
+  metrics        Json // [{category, planned, actual, unit}]
+  lessonsLearned String?
+  isDemo         Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}

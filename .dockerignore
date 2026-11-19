@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+storage/uploads/*
+test-results
+playwright-report
+*.log
+.env
+services/optimizer/__pycache__

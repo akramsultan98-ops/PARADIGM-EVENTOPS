@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────── PARADIGM EVENTOPS design tokens ─────────────
+   Brand: deep navy (#061520) + Paradigm cyan (#00A8C8), from the approved Paradigm
+   interfaces (paradigm-kms). Operational content sits on a calm light surface for
+   readability; the navigation shell carries the brand. Values are HSL triplets. */
+:root {
+  --brand-navy: 205 68% 7%;          /* #061520 */
+  --brand-navy-deep: 206 73% 4%;     /* #030C13 */
+  --brand-navy-mid: 207 67% 12%;     /* #0A1F32 */
+  --brand-navy-light: 207 62% 14%;   /* #0D2438 */
+  --brand-cyan: 190 100% 39%;        /* #00A8C8 */
+  --brand-cyan-light: 190 100% 45%;  /* #00C8E8 */
+  --brand-cyan-pale: 194 72% 78%;    /* #A0DEF0 */
+
+  --background: 210 25% 97%;
+  --surface: 210 22% 95%;
+  --foreground: 207 55% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 207 55% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 207 55% 11%;
+  --primary: 192 100% 34%;           /* slightly deeper cyan for AA contrast on white */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 207 40% 94%;
+  --secondary-foreground: 207 55% 15%;
+  --muted: 210 25% 95%;
+  --muted-foreground: 210 14% 40%;
+  --accent: 192 70% 94%;
+  --accent-foreground: 194 90% 22%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 212 24% 89%;
+  --input: 212 22% 84%;
+  --ring: 192 100% 39%;
+  --radius: 0.625rem;
+
+  --success: 152 62% 34%;
+  --success-soft: 150 55% 94%;
+  --warning: 33 92% 40%;
+  --warning-soft: 40 95% 93%;
+  --danger: 0 70% 48%;
+  --danger-soft: 0 85% 96%;
+  --info: 205 85% 42%;
+  --info-soft: 205 90% 95%;
+  --violet: 262 52% 50%;
+  --violet-soft: 262 70% 96%;
+
+  --sidebar: 205 68% 7%;
+  --sidebar-foreground: 195 40% 92%;
+  --sidebar-muted: 203 28% 58%;
+  --sidebar-active: 207 62% 14%;
+  --sidebar-border: 207 55% 13%;
+
+  --chart-1: 192 100% 37%;
+  --chart-2: 207 60% 28%;
+  --chart-3: 33 90% 50%;
+  --chart-4: 152 55% 40%;
+  --chart-5: 262 50% 58%;
+  --chart-6: 0 65% 55%;
+}
+
+@layer base {
+  * { @apply border-border; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-background text-foreground font-sans antialiased; font-feature-settings: "cv11", "ss01"; }
+  h1, h2, h3 { @apply font-display tracking-tight; }
+  ::selection { background: hsl(var(--brand-cyan) / 0.2); }
+  :focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.6); border-radius: 4px; }
+  /* numbers align in tables */
+  .tabular { font-variant-numeric: tabular-nums; }
+  [dir="rtl"] .flip-rtl { transform: scaleX(-1); }
+}
+
+@layer components {
+  .page-title { @apply font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl; }
+  .section-title { @apply font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground; }
+  .data-table { @apply w-full border-collapse text-sm; }
+  .data-table th { @apply sticky top-0 z-[1] whitespace-nowrap border-b bg-muted/70 px-3 py-2 text-start text-2xs font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur; }
+  .data-table td { @apply border-b border-border/70 px-3 py-2.5 align-middle; }
+  .data-table tbody tr:hover td { @apply bg-accent/40; }
+  .data-table td.num, .data-table th.num { @apply text-end tabular; }
+  .field-label { @apply mb-1.5 block text-xs font-medium text-foreground/80; }
+  .scrollbar-thin { scrollbar-width: thin; }
+}
+
+@media print {
+  aside, header, .no-print { display: none !important; }
+  main { padding: 0 !important; }
+}
