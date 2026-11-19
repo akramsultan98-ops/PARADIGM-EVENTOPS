@@ -3,14 +3,16 @@ import { db } from "@/lib/db";
 import type { AuthUser } from "@/lib/auth/session";
 import { projectScope } from "@/lib/scope";
 import { getLatestPlans } from "./plans";
+import { canReadFinancials } from "@/lib/financial";
 
 /** Projects a department participates in (company/user scoped) with their latest plans. */
 export async function departmentProjects(u: AuthUser, deptKey: string, projectId?: string) {
-  const projects = await db.project.findMany({
+  const fin = canReadFinancials(u);
+  const projects = (await db.project.findMany({
     where: { ...projectScope(u), status: { notIn: ["CANCELLED", "COMPLETED"] }, ...(deptKey === "ACCOUNT" || deptKey === "PMO" ? {} : { departments: { some: { department: { key: deptKey } } } }), ...(projectId ? { id: projectId } : {}) },
     include: { departments: { include: { department: true, lead: { select: { name: true } } } }, venue: true },
     orderBy: { eventStart: "asc" },
-  });
+  })).map((p) => (fin ? p : { ...p, budgetAmount: null }));
   const plans = await getLatestPlans(projects.map((p) => p.id));
   const focus = projects.find((p) => plans.has(p.id) && p.status !== "IN_EXECUTION") ?? projects.find((p) => plans.has(p.id)) ?? projects[0] ?? null;
   return { projects, plans, focus, focusPlan: focus ? plans.get(focus.id) ?? null : null };

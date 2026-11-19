@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth/session";
 import { projectScope } from "@/lib/scope";
 import { getDict } from "@/i18n/server";
 import { getPlan } from "./plans";
+import { canReadFinancials } from "@/lib/financial";
 
 /** Everything a project tab needs, loaded once per request and always company/user scoped. */
 export const projectContext = cache(async (id: string) => {
@@ -16,6 +17,7 @@ export const projectContext = cache(async (id: string) => {
     include: { venue: true, projectManager: true, accountManager: true, departments: { include: { department: true, lead: true }, orderBy: { department: { name: "asc" } } }, members: { include: { user: { include: { role: true } } } } },
   });
   if (!project) notFound();
+  if (!canReadFinancials(u)) project.budgetAmount = null; // P1-2: budget is confidential
   const plan = await getPlan(id);
   return { u, locale, t, project, plan };
 });

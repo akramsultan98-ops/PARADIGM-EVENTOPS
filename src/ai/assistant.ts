@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { db, num } from "@/lib/db";
 import type { AuthUser } from "@/lib/auth/session";
 import { projectScope } from "@/lib/scope";
+import { canReadFinancials, planForUser, redactImpact } from "@/lib/financial";
 import type { PlanResult } from "@/engines/pipeline";
 import { applyScenario, parseWhatIf } from "@/engines/whatif";
 import { compareImpact } from "@/engines/impact";
@@ -29,6 +30,9 @@ async function loadPlan(projectId: string): Promise<{ plan: PlanResult; version:
 
 function toolsFor(u: AuthUser) {
   const scope = projectScope(u);
+  const fin = canReadFinancials(u);
+  // every plan the assistant can see is redacted for users without budget.read (P1-2)
+  const loadPlanFor = async (projectId: string) => { const r = await loadPlan(projectId); return r ? { ...r, plan: planForUser(u, r.plan) } : null; };
   const project = (id: string) => db.project.findFirst({ where: { ...scope, id }, include: { departments: { include: { department: true } }, venue: true } });
   const impl: Record<string, (a: Record<string, unknown>) => Promise<ToolResult>> = {
     list_projects: async () => {
@@ -38,23 +42,23 @@ function toolsFor(u: AuthUser) {
     get_project_overview: async (a) => {
       const p = await project(String(a.projectId));
       if (!p) return "Project not found or not accessible";
-      const pl = await loadPlan(p.id);
+      const pl = await loadPlanFor(p.id);
       return {
         name: p.name, code: p.code, client: p.client, status: p.status, participants: p.participants, location: p.location, venue: p.venue?.name ?? null,
-        setupStart: p.setupStart.toISOString(), eventStart: p.eventStart.toISOString(), eventEnd: p.eventEnd.toISOString(), budget: num(p.budgetAmount), currency: p.currency,
+        setupStart: p.setupStart.toISOString(), eventStart: p.eventStart.toISOString(), eventEnd: p.eventEnd.toISOString(), ...(fin ? { budget: num(p.budgetAmount), currency: p.currency } : {}),
         departments: p.departments.map((d) => ({ department: d.department.name, status: d.status, due: d.dueDate?.toISOString().slice(0, 10) ?? null })),
         plan: pl ? { version: pl.version, status: pl.status, errors: pl.plan.readiness.errors, warnings: pl.plan.readiness.warnings, feasible: pl.plan.readiness.feasible, tasks: pl.plan.tasks.length } : "No plan generated yet",
       };
     },
     list_open_issues: async (a) => {
-      const pl = await loadPlan(String(a.projectId));
+      const pl = await loadPlanFor(String(a.projectId));
       if (!pl || !(await project(String(a.projectId)))) return "No plan generated yet for this project";
       const dept = a.department ? String(a.department).toUpperCase() : null;
       return { issues: pl.plan.issues.filter((i) => i.severity !== "info" && (!dept || i.department === dept)).slice(0, 40).map((i) => ({ severity: i.severity, department: i.department, message: i.message, question: i.question ?? null })) };
     },
     get_plan_section: async (a) => {
       if (!(await project(String(a.projectId)))) return "Project not found";
-      const pl = await loadPlan(String(a.projectId));
+      const pl = await loadPlanFor(String(a.projectId));
       if (!pl) return "No plan generated yet";
       const P = pl.plan;
       switch (String(a.section)) {
@@ -63,13 +67,14 @@ function toolsFor(u: AuthUser) {
         case "av": return { lines: P.av.lines.map((l) => ({ description: l.description, required: l.required, backup: l.backup, allocated: l.allocated, rental: l.rental })), powerKw: P.av.totalPowerKw, techHours: P.av.techHours };
         case "transport": return { trips: P.logistics.trips.map((t) => ({ vehicle: t.vehicleCode, kg: t.weightKg, m3: t.volumeM3 })), backup: P.logistics.backupVehicle?.code ?? null, route: P.logistics.route, unassigned: P.logistics.unassigned };
         case "accommodation": return { rooms: P.accommodation.roomCount, roomNights: P.accommodation.roomNights, unconfirmed: P.accommodation.unconfirmed, costByCurrency: P.accommodation.costByCurrency };
-        case "budget": return { byCurrency: P.budget.byCurrency.map((c) => ({ currency: c.currency, total: c.total })), budget: P.budget.budgetAmount, totalInBudgetCurrency: P.budget.totalInBudgetCurrency, variance: P.budget.variance, conversions: P.budget.conversions };
+        case "budget": if (!fin) return "Budget and cost information requires the budget.read permission."; return { byCurrency: P.budget.byCurrency.map((c) => ({ currency: c.currency, total: c.total })), budget: P.budget.budgetAmount, totalInBudgetCurrency: P.budget.totalInBudgetCurrency, variance: P.budget.variance, conversions: P.budget.conversions };
         case "schedule": return { makespanHours: P.schedule.makespanHours, feasible: P.schedule.feasible, critical: P.tasks.filter((t) => t.critical).map((t) => ({ task: t.name, start: t.start ? new Date(t.start).toISOString() : null })), conflicts: P.schedule.conflicts.filter((c) => c.severity === "error").map((c) => c.message) };
         case "risks": return { risks: P.risks.map((r) => ({ code: r.code, title: r.title, level: r.level, severity: r.severity, contingency: r.contingency })) };
         default: return "Unknown section";
       }
     },
     run_what_if: async (a) => {
+      if (!u.permissions.has("plan.review")) return "Running scenarios requires the plan.review permission.";
       const p = await project(String(a.projectId));
       if (!p) return "Project not found";
       const snap = await buildSnapshot(u.companyId, p.id, new Date());
@@ -78,7 +83,7 @@ function toolsFor(u: AuthUser) {
       if (assumptions.vehiclesUnavailable?.includes("__MAIN__")) assumptions.vehiclesUnavailable = [...base.logistics.trips].sort((x, y) => y.weightKg - x.weightKg).slice(0, 1).map((t) => t.vehicleCode);
       if (!Object.keys(assumptions).length) return "The scenario could not be parsed into supported assumptions (setup days, vehicle breakdown, delivery/travel delay, participants, budget %, price %, event date shift).";
       const { snapshot, notes } = applyScenario(snap, assumptions);
-      const impact = compareImpact(base, runPlanningPipeline(snapshot));
+      const impact = fin ? compareImpact(base, runPlanningPipeline(snapshot)) : redactImpact(compareImpact(base, runPlanningPipeline(snapshot)));
       return { assumptions, notes, summary: impact.summary, domains: impact.domains.filter((d) => d.changed).map((d) => ({ domain: d.domain, deltas: d.deltas, notes: d.notes })), newIssues: impact.newIssues.slice(0, 10), approvalsRequired: impact.approvalsRequired, note: "Simulation only — the approved plan was not changed." };
     },
   };

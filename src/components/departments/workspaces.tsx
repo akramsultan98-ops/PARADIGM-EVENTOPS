@@ -11,6 +11,7 @@ import { DemoBanner, EmptyState, PageHeader, StatCard, StatusBadge, TableWrap } 
 import { Badge } from "@/components/ui/badge";
 import { AvAllocationTable, BoqTable, FleetPanel, IssuesPanel, NoPlan, ProcurementPlanTable, RoomingPanel, TradesTable } from "@/components/planning/panels";
 import { daysUntil, fmtDate, fmtDateTime, fmtMoney, fmtNumber } from "@/lib/format";
+import { canReadFinancials } from "@/lib/financial";
 import { cn } from "@/lib/utils";
 import type { PlanResult } from "@/engines/pipeline";
 
@@ -125,7 +126,7 @@ export async function AvWorkspace({ user, projectId }: WS) {
   const { t, locale } = await getDict();
   const { projects, focus, focusPlan } = await departmentProjects(user, "AV", projectId);
   const [equipment, reqs, approvals] = await Promise.all([
-    db.equipment.findMany({ where: { companyId: user.companyId }, include: { inventory: true }, orderBy: [{ category: "asc" }, { code: "asc" }] }),
+    db.equipment.findMany({ where: { companyId: user.companyId }, include: { inventory: true }, orderBy: [{ category: "asc" }, { code: "asc" }] }).then((rows) => (canReadFinancials(user) ? rows : rows.map((e) => ({ ...e, rentalDailyRate: null })))),
     db.equipmentRequirement.findMany({ where: { projectId: { in: projects.map((p) => p.id) } }, include: { project: { select: { name: true, id: true } }, equipment: true } }),
     db.approval.count({ where: { ...pendingApprovalsWhere(user), entityType: "SUBMISSION" } }),
   ]);
@@ -223,7 +224,7 @@ export async function LogisticsWorkspace({ user, projectId }: WS) {
 export async function AccommodationWorkspace({ user, projectId }: WS) {
   const { t, locale } = await getDict();
   const { projects, plans, focus, focusPlan } = await departmentProjects(user, "ACCOMMODATION", projectId);
-  const hotels = await db.hotel.findMany({ where: { companyId: user.companyId }, include: { roomTypes: true } });
+  const hotels = (await db.hotel.findMany({ where: { companyId: user.companyId }, include: { roomTypes: true } })).map((h) => (canReadFinancials(user) ? h : { ...h, roomTypes: h.roomTypes.map((r) => ({ ...r, nightlyRate: null })) }));
   const all = await db.accommodationAssignment.findMany({ where: { projectId: { in: projects.map((p) => p.id) } }, include: { project: { select: { name: true } }, hotel: true }, orderBy: { checkIn: "asc" } });
   const plan = focusPlan?.plan;
   const nights = [...plans.values()].reduce((s, p) => s + p.plan.accommodation.roomNights, 0);
@@ -269,7 +270,7 @@ export async function AccommodationWorkspace({ user, projectId }: WS) {
 export async function CreativeWorkspace({ user, projectId }: WS) {
   const { t, locale } = await getDict();
   const { projects, focus, focusPlan } = await departmentProjects(user, "CREATIVE", projectId);
-  const items = await db.brandingItem.findMany({ where: { projectId: { in: projects.map((p) => p.id) } }, include: { project: { select: { name: true, id: true } }, vendor: true }, orderBy: { clientApprovalDeadline: "asc" } });
+  const items = (await db.brandingItem.findMany({ where: { projectId: { in: projects.map((p) => p.id) } }, include: { project: { select: { name: true, id: true } }, vendor: true }, orderBy: { clientApprovalDeadline: "asc" } })).map((b) => (canReadFinancials(user) ? b : { ...b, unitCost: null }));
   const plan = focusPlan?.plan;
   return (
     <>
@@ -303,7 +304,7 @@ export async function ProcurementWorkspace({ user, projectId }: WS) {
   const { t, locale } = await getDict();
   const { projects, focus, focusPlan } = await departmentProjects(user, "PROCUREMENT", projectId);
   const { ProcurementBoard } = await import("@/components/departments/procurement-board");
-  const requests = await db.procurementRequest.findMany({ where: { projectId: { in: projects.map((p) => p.id) } }, include: { project: { select: { name: true, id: true } }, vendor: true, quotes: { include: { vendor: true } } }, orderBy: { requiredByDate: "asc" } });
+  const requests = (await db.procurementRequest.findMany({ where: { projectId: { in: projects.map((p) => p.id) } }, include: { project: { select: { name: true, id: true } }, vendor: true, quotes: { include: { vendor: true } } }, orderBy: { requiredByDate: "asc" } })).map((r) => (canReadFinancials(user) ? r : { ...r, unitPrice: null, quotes: r.quotes.map((q) => ({ ...q, unitPrice: null as never })) }));
   const vendors = await db.vendor.findMany({ where: { companyId: user.companyId }, orderBy: { name: "asc" } });
   return (
     <>
@@ -316,7 +317,7 @@ export async function ProcurementWorkspace({ user, projectId }: WS) {
         <StatCard label="Vendors" value={vendors.length} icon={Users} sub="demo vendor list" />
       </div>
       <div className="mt-5"><ProcurementBoard locale={locale} canManage={user.permissions.has("procurement.manage")} canApprove={user.permissions.has("procurement.approve")} vendors={vendors.map((v) => ({ id: v.id, name: v.name }))}
-        requests={requests.map((r) => ({ id: r.id, code: r.code, item: r.item, project: r.project.name, projectId: r.project.id, quantity: r.quantity, unit: r.unit, requiredBy: r.requiredByDate?.toISOString() ?? null, vendor: r.vendor?.name ?? null, vendorId: r.vendorId, unitPrice: num(r.unitPrice), currency: r.currency, taxPct: r.taxPct, status: r.status, received: r.receivedQuantity, specifications: r.specifications, quotes: r.quotes.map((q) => ({ id: q.id, vendor: q.vendor.name, unitPrice: Number(q.unitPrice), currency: q.currency, leadTimeDays: q.leadTimeDays, status: q.status, validUntil: q.validUntil?.toISOString() ?? null })) }))} /></div>
+        requests={requests.map((r) => ({ id: r.id, code: r.code, item: r.item, project: r.project.name, projectId: r.project.id, quantity: r.quantity, unit: r.unit, requiredBy: r.requiredByDate?.toISOString() ?? null, vendor: r.vendor?.name ?? null, vendorId: r.vendorId, unitPrice: num(r.unitPrice), currency: r.currency, taxPct: r.taxPct, status: r.status, received: r.receivedQuantity, specifications: r.specifications, quotes: r.quotes.map((q) => ({ id: q.id, vendor: q.vendor.name, unitPrice: q.unitPrice == null ? null : Number(q.unitPrice), currency: q.currency, leadTimeDays: q.leadTimeDays, status: q.status, validUntil: q.validUntil?.toISOString() ?? null })) }))} /></div>
       {focusPlan && <div className="mt-5"><ProcurementPlanTable plan={focusPlan.plan} locale={locale} /></div>}
       <Card className="mt-5 min-w-0">
         <CardHeader><div><CardTitle>Vendor database</CardTitle><CardDescription>Sample vendors are demo records — not approved Paradigm suppliers</CardDescription></div></CardHeader>
@@ -352,7 +353,7 @@ export async function AccountWorkspace({ user, projectId }: WS) {
                 <div className="flex justify-between text-xs"><span className="text-muted-foreground">Event</span><span>{fmtDate(p.eventStart, locale)} ({daysUntil(p.eventStart)} days)</span></div>
                 <div className="flex justify-between text-xs"><span className="text-muted-foreground">Department progress</span><span>{approved}/{p.departments.length} approved</span></div>
                 <div className="flex flex-wrap gap-1">{p.departments.map((d) => <StatusBadge key={d.id} status={d.status} locale={locale} className="!font-medium" />)}</div>
-                {plan && <div className="flex justify-between text-xs"><span className="text-muted-foreground">Planned cost</span><span className="tabular">{fmtMoney(plan.budget.totalInBudgetCurrency, p.currency, locale)} / {fmtMoney(num(p.budgetAmount), p.currency, locale)}</span></div>}
+                {plan && canReadFinancials(user) && <div className="flex justify-between text-xs"><span className="text-muted-foreground">Planned cost</span><span className="tabular">{fmtMoney(plan.budget.totalInBudgetCurrency, p.currency, locale)} / {fmtMoney(num(p.budgetAmount), p.currency, locale)}</span></div>}
               </CardContent>
             </Card>
           );

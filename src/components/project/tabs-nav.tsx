@@ -10,13 +10,14 @@ export const PROJECT_TABS = [
   ["approvals", "Approvals"], ["activity", "Activity History"],
 ] as const;
 
-export function ProjectTabs({ projectId }: { projectId: string }) {
+/** `hidden` is cosmetic only — every tab is authorised again on the server. */
+export function ProjectTabs({ projectId, hidden = [] }: { projectId: string; hidden?: string[] }) {
   const path = usePathname();
   const current = path.split("/")[3] ?? "overview";
   return (
     <nav className="scrollbar-thin -mx-4 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0" aria-label="Project sections">
       <ul className="flex min-w-max gap-0.5">
-        {PROJECT_TABS.map(([key, label]) => (
+        {PROJECT_TABS.filter(([key]) => !hidden.includes(key)).map(([key, label]) => (
           <li key={key}>
             <Link href={key === "overview" ? `/projects/${projectId}` : `/projects/${projectId}/${key}`} aria-current={current === key ? "page" : undefined}
               className={cn("-mb-px block whitespace-nowrap border-b-2 px-3 py-2 text-[13px] font-medium transition-colors", current === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{label}</Link>

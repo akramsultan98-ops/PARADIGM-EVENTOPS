@@ -151,14 +151,23 @@ describe("tenant isolation", () => {
 });
 
 describe("exports", () => {
-  it("builds the 20-sheet master workbook with the required naming", async () => {
-    const { buffer, fileName } = await buildWorkbook(companyId, caiId);
+  it("builds the 20-sheet master workbook with the required naming (requester with budget.read)", async () => {
+    const { buffer, fileName } = await buildWorkbook(companyId, caiId, undefined, { includeFinancials: true });
     expect(fileName).toBe("PARADIGM_EVENTOPS_CAIRO_PRODUCT_LAUNCH_MASTER_PLAN.xlsx");
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer as unknown as ArrayBuffer);
     expect(wb.worksheets.map((w) => w.name)).toHaveLength(20);
     expect(wb.getWorksheet("18_Actual_vs_Planned")!.rowCount).toBeGreaterThan(5);
+  });
+
+  it("defaults to a workbook without financial data (19 sheets, no budget sheet)", async () => {
+    const { buffer } = await buildWorkbook(companyId, caiId);
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+    expect(wb.worksheets).toHaveLength(19);
+    expect(wb.getWorksheet("16_Budget_Summary")).toBeUndefined();
   });
 
   it("refuses to export a project of another company", async () => {

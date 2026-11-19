@@ -10,7 +10,7 @@ import { toast } from "@/components/ui/toast";
 import { addQuoteAction, procurementTransitionAction, recordDeliveryAction, selectQuoteAction } from "@/server/actions/procurement";
 import { cn } from "@/lib/utils";
 
-interface Req { id: string; code: string; item: string; project: string; projectId: string; quantity: number; unit: string; requiredBy: string | null; vendor: string | null; vendorId: string | null; unitPrice: number | null; currency: string; taxPct: number; status: string; received: number; specifications: string | null; quotes: { id: string; vendor: string; unitPrice: number; currency: string; leadTimeDays: number | null; status: string; validUntil: string | null }[] }
+interface Req { id: string; code: string; item: string; project: string; projectId: string; quantity: number; unit: string; requiredBy: string | null; vendor: string | null; vendorId: string | null; unitPrice: number | null; currency: string; taxPct: number; status: string; received: number; specifications: string | null; quotes: { id: string; vendor: string; unitPrice: number | null; currency: string; leadTimeDays: number | null; status: string; validUntil: string | null }[] }
 
 export function ProcurementBoard({ requests, vendors, canManage, canApprove, locale }: { requests: Req[]; vendors: { id: string; name: string }[]; canManage: boolean; canApprove: boolean; locale: "en" | "ar" }) {
   const [pending, start] = useTransition();
@@ -56,7 +56,8 @@ export function ProcurementBoard({ requests, vendors, canManage, canApprove, loc
 }
 
 function QuoteDialog({ req, vendors, onClose, canManage, act, pending }: { req: Req; vendors: { id: string; name: string }[]; onClose: () => void; canManage: boolean; act: (p: Promise<{ ok: boolean; error?: string; message?: string }>) => void; pending: boolean }) {
-  const best = req.quotes.length ? Math.min(...req.quotes.map((q) => q.unitPrice)) : null;
+  const priced = req.quotes.map((q) => q.unitPrice).filter((v): v is number => v != null);
+  const best = priced.length ? Math.min(...priced) : null; // prices are null for users without budget.read
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
@@ -64,7 +65,7 @@ function QuoteDialog({ req, vendors, onClose, canManage, act, pending }: { req: 
         <DialogBody className="space-y-4">
           <table className="data-table"><thead><tr><th>Vendor</th><th className="num">Unit price</th><th className="num">Total</th><th className="num">Lead time</th><th>Valid until</th><th /></tr></thead>
             <tbody>{req.quotes.map((q) => (
-              <tr key={q.id} className={cn(q.status === "SELECTED" && "bg-success-soft/50")}><td className="font-medium">{q.vendor}{q.unitPrice === best && <span className="ms-2 rounded bg-success-soft px-1 text-[10px] font-bold text-success">LOWEST</span>}</td><td className="num">{q.unitPrice.toLocaleString()} {q.currency}</td><td className="num">{(q.unitPrice * req.quantity).toLocaleString()} {q.currency}</td><td className="num">{q.leadTimeDays ?? "—"} d</td><td className="text-xs">{q.validUntil?.slice(0, 10) ?? "—"}</td><td>{canManage && q.status !== "SELECTED" && !["PENDING_APPROVAL", "APPROVED", "ORDERED", "DELIVERED"].includes(req.status) && <Button size="sm" variant="outline" disabled={pending} onClick={() => act(selectQuoteAction(q.id))}>Select</Button>}{q.status === "SELECTED" && <StatusBadge status="APPROVED" />}</td></tr>
+              <tr key={q.id} className={cn(q.status === "SELECTED" && "bg-success-soft/50")}><td className="font-medium">{q.vendor}{q.unitPrice === best && <span className="ms-2 rounded bg-success-soft px-1 text-[10px] font-bold text-success">LOWEST</span>}</td><td className="num">{q.unitPrice == null ? "—" : `${q.unitPrice.toLocaleString()} ${q.currency}`}</td><td className="num">{q.unitPrice == null ? "—" : `${(q.unitPrice * req.quantity).toLocaleString()} ${q.currency}`}</td><td className="num">{q.leadTimeDays ?? "—"} d</td><td className="text-xs">{q.validUntil?.slice(0, 10) ?? "—"}</td><td>{canManage && q.status !== "SELECTED" && !["PENDING_APPROVAL", "APPROVED", "ORDERED", "DELIVERED"].includes(req.status) && <Button size="sm" variant="outline" disabled={pending} onClick={() => act(selectQuoteAction(q.id))}>Select</Button>}{q.status === "SELECTED" && <StatusBadge status="APPROVED" />}</td></tr>
             ))}</tbody></table>
           {req.quotes.length === 0 && <p className="text-sm text-muted-foreground">No quotations yet.</p>}
           {canManage && !["PENDING_APPROVAL", "APPROVED", "ORDERED", "DELIVERED", "CANCELLED"].includes(req.status) && (

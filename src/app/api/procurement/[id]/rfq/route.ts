@@ -9,6 +9,8 @@ export const runtime = "nodejs";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const u = await getCurrentUser();
   if (!u) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // RFQs are procurement documents (vendor, quantities, delivery dates): procurement staff only
+  if (!u.permissions.has("procurement.manage")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const r = await db.procurementRequest.findFirst({ where: { id, project: projectScope(u) }, include: { project: { include: { venue: true } }, vendor: true, material: true } });
   if (!r) return NextResponse.json({ error: "Not found" }, { status: 404 });

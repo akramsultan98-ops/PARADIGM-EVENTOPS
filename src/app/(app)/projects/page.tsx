@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
+import { redactRecords } from "@/lib/financial";
 import { db, num } from "@/lib/db";
 import { projectScope } from "@/lib/scope";
 import { getDict } from "@/i18n/server";
@@ -19,11 +20,11 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
   const u = await requireUser();
   const { t, locale } = await getDict();
   const { status, q } = await searchParams;
-  const projects = await db.project.findMany({
+  const projects = redactRecords(u, await db.project.findMany({
     where: { ...projectScope(u), ...(status ? { status: status as never } : {}), ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { client: { contains: q, mode: "insensitive" } }, { code: { contains: q, mode: "insensitive" } }] } : {}) },
     include: { departments: true, projectManager: { select: { name: true } }, venue: { select: { name: true } } },
     orderBy: { eventStart: "asc" },
-  });
+  }));
   const plans = await getLatestPlans(projects.map((p) => p.id));
   return (
     <>

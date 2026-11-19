@@ -1,5 +1,7 @@
 import { db, num } from "@/lib/db";
 import { projectContext } from "@/server/queries/project";
+import { redirect } from "next/navigation";
+import { canReadFinancials } from "@/lib/financial";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, StatusBadge, TableWrap } from "@/components/ui/kit";
 import { Badge } from "@/components/ui/badge";
@@ -113,8 +115,10 @@ export async function ManpowerTab({ id }: { id: string }) {
 }
 
 export async function ProcurementTab({ id }: { id: string }) {
-  const { locale, plan } = await projectContext(id);
-  const reqs = await db.procurementRequest.findMany({ where: { projectId: id }, include: { vendor: true, quotes: true }, orderBy: { requiredByDate: "asc" } });
+  const { u, locale, plan } = await projectContext(id);
+  const fin = canReadFinancials(u);
+  const reqs = (await db.procurementRequest.findMany({ where: { projectId: id }, include: { vendor: true, quotes: true }, orderBy: { requiredByDate: "asc" } }))
+    .map((r) => (fin ? r : { ...r, unitPrice: null, quotes: r.quotes.map((q) => ({ ...q, unitPrice: null as never })) }));
   return (
     <div className="space-y-5">
       {plan ? <ProcurementPlanTable plan={plan.plan} locale={locale} /> : <NoPlan projectId={id} canGenerate />}
@@ -129,6 +133,7 @@ export async function ProcurementTab({ id }: { id: string }) {
 
 export async function BudgetTab({ id }: { id: string }) {
   const { u, locale, project: p, plan } = await projectContext(id);
+  if (!canReadFinancials(u)) redirect("/forbidden?need=budget.read"); // P1-2: enforced on the server, not by hiding the tab
   const [budgets, actuals] = await Promise.all([
     db.projectBudget.findMany({ where: { projectId: id }, orderBy: { createdAt: "desc" } }),
     db.costItem.findMany({ where: { projectId: id, generated: false }, orderBy: { createdAt: "desc" } }),

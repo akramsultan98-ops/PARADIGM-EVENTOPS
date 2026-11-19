@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { db, num } from "@/lib/db";
 import { projectScope } from "@/lib/scope";
 import { brandedPdf } from "@/server/services/pdf";
+import { canReadFinancials, planForUser } from "@/lib/financial";
 import type { PlanResult } from "@/engines/pipeline";
 
 export const runtime = "nodejs";
@@ -18,10 +19,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!p) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const v = await db.scheduleVersion.findFirst({ where: { projectId: id, status: { not: "SUPERSEDED" } }, orderBy: { version: "desc" } });
   if (!v) return NextResponse.json({ error: "No plan generated" }, { status: 409 });
-  const P = v.snapshot as unknown as PlanResult;
+  const P = planForUser(u, v.snapshot as unknown as PlanResult); // P1-2: no money without budget.read
   const { doc, h2, kv, tableRows, finish } = brandedPdf(`${p.name} — Integrated Plan Report`, `${p.code} · plan v${v.version} (${v.status}) · generated ${new Date().toISOString().slice(0, 10)}`, p.isDemo);
   h2("Project summary");
-  kv([["Client", p.client], ["Venue", `${p.venue?.name ?? "TBC"} (${p.location})`], ["Setup", `${f(p.setupStart)} → ${f(p.setupEnd)}`], ["Event", `${f(p.eventStart)} → ${f(p.eventEnd)}`], ["Participants", String(p.participants)], ["Project Manager", p.projectManager?.name ?? "—"], ["Readiness", `${P.readiness.errors} errors · ${P.readiness.warnings} warnings · schedule ${P.schedule.feasible ? "feasible" : "has conflicts"}`], ["Budget", `${n(num(p.budgetAmount))} ${p.currency} · planned ${n(P.budget.totalInBudgetCurrency)} ${p.currency} · variance ${n(P.budget.variance)}`]]);
+  kv([["Client", p.client], ["Venue", `${p.venue?.name ?? "TBC"} (${p.location})`], ["Setup", `${f(p.setupStart)} → ${f(p.setupEnd)}`], ["Event", `${f(p.eventStart)} → ${f(p.eventEnd)}`], ["Participants", String(p.participants)], ["Project Manager", p.projectManager?.name ?? "—"], ["Readiness", `${P.readiness.errors} errors · ${P.readiness.warnings} warnings · schedule ${P.schedule.feasible ? "feasible" : "has conflicts"}`], ...(canReadFinancials(u) ? [["Budget", `${n(num(p.budgetAmount))} ${p.currency} · planned ${n(P.budget.totalInBudgetCurrency)} ${p.currency} · variance ${n(P.budget.variance)}`]] as [string, string][] : [])]);
   h2("Material BOQ");
   tableRows([{ h: "Material", w: 170 }, { h: "Items", w: 90 }, { h: "Net", w: 50, align: "right" }, { h: "Purchase", w: 55, align: "right" }, { h: "Unit", w: 55 }, { h: "State", w: 95 }], P.production.boq.map((b) => [b.name, b.itemCodes.join(", "), n(b.netQuantity, 2), n(b.purchaseQuantity, 2), b.unit, b.state]));
   h2("Manpower");

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/session";
+import { canReadFinancials } from "@/lib/financial";
 import { db } from "@/lib/db";
 import { projectScope } from "@/lib/scope";
 import { getDict } from "@/i18n/server";
@@ -19,7 +20,7 @@ export default async function ExecutionPage({ searchParams }: { searchParams: Pr
   const projects = await db.project.findMany({ where: { ...projectScope(u), status: { in: ["APPROVED", "IN_PREPARATION", "IN_EXECUTION", "UNDER_REVIEW"] } }, orderBy: [{ status: "desc" }, { eventStart: "asc" }] });
   const current = projects.find((p) => p.id === project) ?? projects.find((p) => p.status === "IN_EXECUTION") ?? projects[0];
   if (!current) return <><PageHeader title={t.nav.execution} /><EmptyState title="No approved projects yet" description="Execution tracking starts once a master plan is approved." /></>;
-  const d = await executionData(current.id);
+  const d = await executionData(current.id, canReadFinancials(u));
   return (
     <>
       <PageHeader title={t.nav.execution} description="Site execution: task status, actual times, consumption, delays, photos and inspections — compared live against the approved plan."

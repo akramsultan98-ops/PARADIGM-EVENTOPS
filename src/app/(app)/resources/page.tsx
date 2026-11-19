@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
+import { redactRecords } from "@/lib/financial";
 import { db, num } from "@/lib/db";
 import { getDict } from "@/i18n/server";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,13 +12,13 @@ export const metadata = { title: "Resources & inventory" };
 export default async function ResourcesPage() {
   const u = await requireUser();
   const { t, locale } = await getDict();
-  const [materials, equipment, vehicles, reservations, labor] = await Promise.all([
+  const [materials, equipment, vehicles, reservations, labor] = redactRecords(u, await Promise.all([
     db.material.findMany({ where: { companyId: u.companyId }, include: { supplier: true }, orderBy: [{ category: "asc" }, { code: "asc" }] }),
     db.equipment.findMany({ where: { companyId: u.companyId }, include: { inventory: true }, orderBy: [{ category: "asc" }, { code: "asc" }] }),
     db.vehicle.findMany({ where: { companyId: u.companyId }, orderBy: { code: "asc" } }),
     db.resourceAssignment.findMany({ where: { project: { companyId: u.companyId, status: { notIn: ["CANCELLED", "COMPLETED"] } } }, include: { project: { select: { code: true, name: true } } }, orderBy: { startAt: "asc" } }),
     db.laborCategory.findMany({ where: { companyId: u.companyId }, orderBy: { name: "asc" } }),
-  ]);
+  ]));
   return (
     <>
       <PageHeader title={t.nav.resources} description="Materials stock, AV & technical equipment, fleet and crew capacity, with reservations from active projects." />

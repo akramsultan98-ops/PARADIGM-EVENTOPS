@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExecutionBoard } from "@/components/execution/execution-board";
 import { UploadForm } from "@/components/execution/upload";
 import { fmtDateTime, fmtMoney } from "@/lib/format";
+import { canReadFinancials } from "@/lib/financial";
 import { RiskEditor } from "./forms";
 import { CommentBox } from "./comment-box";
 import { DecisionButtons } from "./approve-plan";
@@ -16,7 +17,8 @@ import { cn } from "@/lib/utils";
 
 export async function RisksTab({ id }: { id: string }) {
   const { u, locale } = await projectContext(id);
-  const risks = await db.risk.findMany({ where: { projectId: id }, include: { owner: { select: { name: true } }, department: true }, orderBy: { severity: "desc" } });
+  const risks = (await db.risk.findMany({ where: { projectId: id }, include: { owner: { select: { name: true } }, department: true }, orderBy: { severity: "desc" } }))
+    .map((r) => (canReadFinancials(u) ? r : { ...r, costImpact: null }));
   return <RiskRegister risks={risks} locale={locale} canEdit={u.permissions.has("risk.manage")} />;
 }
 
@@ -64,7 +66,7 @@ export function RiskRegister({ risks, locale, canEdit, showProject }: { risks: R
 
 export async function ExecutionTab({ id }: { id: string }) {
   const { u, locale } = await projectContext(id);
-  const d = await executionData(id);
+  const d = await executionData(id, canReadFinancials(u));
   return (
     <div className="space-y-5">
       <div className="flex justify-end"><Link href={`/execution/actual-vs-planned?project=${id}`} className="text-sm font-medium text-primary">Actual vs planned →</Link></div>
@@ -125,7 +127,9 @@ export async function DocumentList({ docs, locale, canReview }: { docs: (Awaited
 
 export async function ApprovalsTab({ id }: { id: string }) {
   const { u, locale } = await projectContext(id);
-  const approvals = await db.approval.findMany({ where: { projectId: id }, orderBy: [{ status: "asc" }, { createdAt: "desc" }] });
+  // procurement / budget approval descriptions quote prices — confidential without budget.read
+  const approvals = (await db.approval.findMany({ where: { projectId: id }, orderBy: [{ status: "asc" }, { createdAt: "desc" }] }))
+    .map((a) => (canReadFinancials(u) || !["PROCUREMENT", "BUDGET"].includes(a.entityType) ? a : { ...a, description: null }));
   const users = new Map((await db.user.findMany({ where: { companyId: u.companyId }, select: { id: true, name: true } })).map((x) => [x.id, x.name]));
   return (
     <Card className="min-w-0">

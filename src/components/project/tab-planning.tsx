@@ -9,13 +9,14 @@ import { fmtDateTime, fmtNumber } from "@/lib/format";
 import { ChangeRequestDialog, WhatIfForm } from "./forms";
 import { DecisionButtons } from "./approve-plan";
 import type { ChangeImpact } from "@/engines/impact";
+import { canReadFinancials, redactChangeEntries, redactImpact } from "@/lib/financial";
 import { cn } from "@/lib/utils";
 
 type SimResult = { notes: string[]; impact: ChangeImpact; recommendations: string[]; baseline: { setupSlackHours: number | null; cost: { currency: string; total: number }[] }; scenario: { setupSlackHours: number | null; cost: { currency: string; total: number }[]; feasible: boolean } };
 
 export async function PlanningTab({ id }: { id: string }) {
   const { u, locale, project: p, plan } = await projectContext(id);
-  const [versions, sims, changes, approval, items, vehicles, pendingSubs] = await Promise.all([
+  const [versions, rawSims, rawChanges, approval, items, vehicles, pendingSubs] = await Promise.all([
     db.scheduleVersion.findMany({ where: { projectId: id }, select: { id: true, version: true, label: true, status: true, feasible: true, makespanHours: true, createdAt: true, approvedAt: true }, orderBy: { version: "desc" } }),
     db.scenarioSimulation.findMany({ where: { projectId: id }, orderBy: { createdAt: "desc" }, take: 6 }),
     db.projectChange.findMany({ where: { projectId: id }, orderBy: { createdAt: "desc" } }),
@@ -24,6 +25,9 @@ export async function PlanningTab({ id }: { id: string }) {
     db.vehicle.findMany({ where: { companyId: u.companyId }, select: { id: true, code: true, available: true } }),
     db.departmentSubmission.findMany({ where: { projectId: id, status: { in: ["DRAFT", "NEEDS_INFORMATION", "SUBMITTED", "UNDER_REVIEW"] } }, include: { department: true } }),
   ]);
+  const fin = canReadFinancials(u);
+  const sims = fin ? rawSims : rawSims.map((s) => ({ ...s, result: redactImpact(s.result) }));
+  const changes = fin ? rawChanges : rawChanges.map((c) => ({ ...c, impact: redactImpact(c.impact), changes: redactChangeEntries(c.changes) }));
   const P = plan?.plan;
   const questions = P ? Object.entries(P.readiness.questions.reduce<Record<string, string[]>>((acc, q) => { (acc[q.department] ??= []).push(q.question); return acc; }, {})) : [];
   return (

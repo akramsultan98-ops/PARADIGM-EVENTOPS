@@ -10,6 +10,7 @@ import { ProjectTabs } from "@/components/project/tabs-nav";
 import { ProjectActions } from "@/components/project/project-actions";
 import { daysUntil, fmtDate } from "@/lib/format";
 import { getPlan } from "@/server/queries/plans";
+import { canReadFinancials } from "@/lib/financial";
 
 export default async function ProjectLayout({ children, params }: { children: React.ReactNode; params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -35,7 +36,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
         <ProjectActions projectId={p.id} status={p.status} can={{ generate: u.permissions.has("plan.generate") && !["COMPLETED", "CANCELLED"].includes(p.status), export: u.permissions.has("export.run") && !!plan, edit: u.permissions.has("project.edit") }} />
       </div>
       {p.isDemo && <div className="mb-3"><DemoBanner /></div>}
-      <ProjectTabs projectId={p.id} />
+      <ProjectTabs projectId={p.id} hidden={canReadFinancials(u) ? [] : ["budget"]} />
       <div className="mt-5">{children}</div>
     </div>
   );

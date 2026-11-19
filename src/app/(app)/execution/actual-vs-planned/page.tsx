@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
+import { canReadFinancials } from "@/lib/financial";
 import { db } from "@/lib/db";
 import { projectScope } from "@/lib/scope";
 import { actualVsPlanned } from "@/server/queries/execution";
@@ -17,7 +18,7 @@ export default async function AvpPage({ searchParams }: { searchParams: Promise<
   const projects = await db.project.findMany({ where: { ...projectScope(u), scheduleVersions: { some: { status: "APPROVED" } } }, orderBy: { eventStart: "asc" } });
   const current = projects.find((p) => p.id === project) ?? projects[0];
   const historical = await db.historicalEvent.findMany({ where: { companyId: u.companyId }, orderBy: { eventDate: "desc" } });
-  const avp = current ? await actualVsPlanned(current.id) : null;
+  const avp = current ? await actualVsPlanned(current.id, canReadFinancials(u)) : null;
   return (
     <>
       <PageHeader eyebrow="Learning loop" title="Actual vs planned" description="Accuracy per category = 100% − |actual − planned| ÷ planned. Failed estimates are shown, not hidden. Accuracy claims require a representative validation dataset (see docs/ACCURACY_VALIDATION.md)." />

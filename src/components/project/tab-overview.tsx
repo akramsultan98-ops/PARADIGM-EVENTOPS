@@ -7,6 +7,7 @@ import { EmptyState, KeyValue, StatCard, StatusBadge, TableWrap } from "@/compon
 import { IssuesPanel } from "@/components/planning/panels";
 import { Progress } from "@/components/ui/progress";
 import { daysUntil, fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
+import { canReadFinancials } from "@/lib/financial";
 import { DepartmentAssigner } from "./department-assigner";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +32,7 @@ export async function OverviewTab({ id }: { id: string }) {
         <StatCard label="Open errors" value={P?.readiness.errors ?? "—"} icon={AlertTriangle} tone={P?.readiness.errors ? "danger" : "success"} sub={P ? `${P.readiness.warnings} warnings` : undefined} />
         <StatCard label="Tasks completed" value={`${done}/${totalTasks}`} icon={ClipboardList} href={`/projects/${id}/timeline`} />
         <StatCard label="Schedule" value={P ? (P.schedule.feasible ? "Feasible" : "Conflicts") : "—"} icon={CheckCircle2} tone={P ? (P.schedule.feasible ? "success" : "danger") : "default"} href={`/projects/${id}/gantt`} />
-        <StatCard label="Planned cost" value={P?.budget.totalInBudgetCurrency != null ? fmtMoney(P.budget.totalInBudgetCurrency, p.currency, locale) : "—"} icon={Coins} sub={num(p.budgetAmount) ? `budget ${fmtMoney(num(p.budgetAmount), p.currency, locale)}` : "no budget set"} href={`/projects/${id}/budget`} />
+        {canReadFinancials(u) && <StatCard label="Planned cost" value={P?.budget.totalInBudgetCurrency != null ? fmtMoney(P.budget.totalInBudgetCurrency, p.currency, locale) : "—"} icon={Coins} sub={num(p.budgetAmount) ? `budget ${fmtMoney(num(p.budgetAmount), p.currency, locale)}` : "no budget set"} href={`/projects/${id}/budget`} />}
       </div>
       <div className="grid gap-5 xl:grid-cols-3">
         <Card className="min-w-0 xl:col-span-2">

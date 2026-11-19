@@ -4,6 +4,7 @@ import type { AuthUser } from "@/lib/auth/session";
 import { projectScope } from "@/lib/scope";
 import { pendingApprovalsWhere } from "@/server/services/approvals";
 import { getLatestPlans } from "./plans";
+import { canReadFinancials } from "@/lib/financial";
 
 export async function pmDashboard(u: AuthUser) {
   const scope = projectScope(u);
@@ -26,7 +27,7 @@ export async function pmDashboard(u: AuthUser) {
   const missing = active.flatMap((p) => p.departments.filter((d) => ["DRAFT", "NEEDS_INFORMATION"].includes(d.status)).map((d) => ({ projectId: p.id, project: p.name, department: d.department.name, status: d.status, due: d.dueDate })));
   const conflicts = [...plans.values()].reduce((s, x) => s + x.plan.schedule.conflicts.filter((c) => c.type === "CAPACITY" || c.type === "RESOURCE_DELAY").length, 0);
   const issues = active.flatMap((p) => (plans.get(p.id)?.plan.issues ?? []).filter((i) => i.severity === "error").map((i) => ({ ...i, projectId: p.id, project: p.name })));
-  const budget = active.map((p) => {
+  const budget = !canReadFinancials(u) ? [] : active.map((p) => {
     const pl = plans.get(p.id)?.plan;
     return { id: p.id, name: p.name, code: p.code, budget: num(p.budgetAmount), currency: p.currency, planned: pl?.budget.totalInBudgetCurrency ?? null, utilization: pl?.budget.utilizationPct ?? null, byCategory: pl?.budget.byCurrency.find((c) => c.currency === p.currency)?.byCategory ?? {} };
   });

@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
+import { redactRecords } from "@/lib/financial";
 import { db, num } from "@/lib/db";
 import { getDict } from "@/i18n/server";
 import { departmentProjects } from "@/server/queries/departments";
@@ -18,7 +19,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
   const { projects, plans, focus } = await departmentProjects(u, "LOGISTICS");
   const current = project ? projects.find((p) => p.id === project) ?? focus : focus;
   const [vehicles, bookings] = await Promise.all([
-    db.vehicle.findMany({ where: { companyId: u.companyId }, orderBy: { code: "asc" } }),
+    db.vehicle.findMany({ where: { companyId: u.companyId }, orderBy: { code: "asc" } }).then((v) => redactRecords(u, v)),
     db.resourceAssignment.findMany({ where: { resourceType: "VEHICLE", project: { companyId: u.companyId, status: { notIn: ["CANCELLED", "COMPLETED"] } } }, include: { project: { select: { code: true } } }, orderBy: { startAt: "asc" } }),
   ]);
   const days: Date[] = [];

@@ -3,6 +3,7 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import { db, num } from "@/lib/db";
 import type { PlanResult } from "@/engines/pipeline";
+import { redactChangeEntries, redactPlanFinancials } from "@/lib/financial";
 import { actualVsPlanned } from "@/server/queries/execution";
 import { BRAND } from "@/config/brand";
 import { DEMO_LABEL } from "@/demo/aswan";
@@ -23,23 +24,33 @@ export const SHEET_GROUPS: Record<string, string[]> = {
   procurement: ["01", "14"], budget: ["01", "16"], risks: ["01", "15"],
 };
 
-export async function buildWorkbook(companyId: string, projectId: string, only?: string[]) {
+/** Columns that carry money; removed from every sheet when the requester lacks budget.read (P1-2). */
+const MONEY_HEADERS = new Set(["Amount", "Cost impact", "Cost", "Daily cost", "Est. cost", "Rental cost", "Unit cost", "Unit price", "Rate"]);
+/** Sheets that are financial in their entirety. */
+const FINANCIAL_SHEETS = new Set(["16"]);
+
+/**
+ * `includeFinancials` must be `canReadFinancials(user)` of the requester. Without it the workbook contains
+ * no costs, prices, rates or budget: the plan is redacted, money columns and the budget sheet are omitted.
+ */
+export async function buildWorkbook(companyId: string, projectId: string, only?: string[], opts: { includeFinancials: boolean } = { includeFinancials: false }) {
+  const fin = opts.includeFinancials;
   const p = await db.project.findFirstOrThrow({ where: { id: projectId, companyId }, include: { venue: true, projectManager: true, accountManager: true, departments: { include: { department: true, lead: true } } } });
   const version = await db.scheduleVersion.findFirst({ where: { projectId, status: { not: "SUPERSEDED" } }, orderBy: [{ status: "asc" }, { version: "desc" }] });
   const approved = await db.scheduleVersion.findFirst({ where: { projectId, status: "APPROVED" }, orderBy: { version: "desc" } });
   const v = approved ?? version;
   if (!v) throw new Error("No plan has been generated for this project");
-  const P = v.snapshot as unknown as PlanResult;
+  const P = fin ? (v.snapshot as unknown as PlanResult) : redactPlanFinancials(v.snapshot as unknown as PlanResult);
   const [tasks, reqs, submissions, procurement, risks, changes, approvals, items, costs] = await Promise.all([
     db.task.findMany({ where: { projectId }, include: { department: true, laborCategory: true, predecessors: { include: { predecessor: true } } }, orderBy: { plannedStart: "asc" } }),
     db.eventRequirement.findMany({ where: { projectId } }),
     db.departmentSubmission.findMany({ where: { projectId }, include: { department: true, submittedBy: true, reviewer: true } }),
-    db.procurementRequest.findMany({ where: { projectId }, include: { vendor: true }, orderBy: { requiredByDate: "asc" } }),
-    db.risk.findMany({ where: { projectId }, include: { owner: true, department: true }, orderBy: { severity: "desc" } }),
+    db.procurementRequest.findMany({ where: { projectId }, include: { vendor: true }, orderBy: { requiredByDate: "asc" } }).then((rows) => (fin ? rows : rows.map((r) => ({ ...r, unitPrice: null })))),
+    db.risk.findMany({ where: { projectId }, include: { owner: true, department: true }, orderBy: { severity: "desc" } }).then((rows) => (fin ? rows : rows.map((r) => ({ ...r, costImpact: null })))),
     db.projectChange.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } }),
     db.approval.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } }),
     db.productionItem.findMany({ where: { projectId }, include: { specs: { include: { material: true } } }, orderBy: { code: "asc" } }),
-    db.costItem.findMany({ where: { projectId, generated: false } }),
+    fin ? db.costItem.findMany({ where: { projectId, generated: false } }) : Promise.resolve([]),
   ]);
   const users = new Map((await db.user.findMany({ where: { companyId }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
 
@@ -48,7 +59,7 @@ export async function buildWorkbook(companyId: string, projectId: string, only?:
   wb.company = BRAND.organization;
   wb.created = new Date();
   wb.title = `${p.name} — Master Plan`;
-  const include = (id: string) => !only || only.includes(id);
+  const include = (id: string) => (!only || only.includes(id)) && (fin || !FINANCIAL_SHEETS.has(id));
   const banner = (ws: ExcelJS.Worksheet, title: string, cols: number) => {
     ws.mergeCells(1, 1, 1, Math.max(cols, 4));
     const t = ws.getCell(1, 1);
@@ -63,8 +74,9 @@ export async function buildWorkbook(companyId: string, projectId: string, only?:
     s.font = { size: 9, italic: true, color: { argb: p.isDemo ? "FFB45309" : "FF4A7A95" } };
     s.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PALE } };
   };
-  const table = (id: string, name: string, title: string, cols: Col[], rows: Record<string, unknown>[], opts: { stateKey?: string; note?: string } = {}) => {
+  const table = (id: string, name: string, title: string, allCols: Col[], rows: Record<string, unknown>[], opts: { stateKey?: string; note?: string } = {}) => {
     if (!include(id)) return null;
+    const cols = fin ? allCols : allCols.filter((c) => !MONEY_HEADERS.has(c.header));
     const ws = wb.addWorksheet(`${id}_${name}`.slice(0, 31), { views: [{ state: "frozen", ySplit: opts.note ? 4 : 3 }], properties: { tabColor: { argb: CYAN } } });
     banner(ws, title, cols.length);
     let hr = 3;
@@ -110,7 +122,7 @@ export async function buildWorkbook(companyId: string, projectId: string, only?:
       ["Project", p.name], ["Code", p.code], ["Client", p.client], ["Category", p.category], ["Location / venue", `${p.location} — ${p.venue?.name ?? "venue TBC"}`],
       ["Participants", p.participants, N0], ["Setup start", tz(p.setupStart), DT], ["Setup end", tz(p.setupEnd), DT], ["Event start", tz(p.eventStart), DT], ["Event end", tz(p.eventEnd), DT], ["Dismantle end", tz(p.dismantleEnd), DT],
       ["Project Manager", p.projectManager?.name ?? null], ["Account Manager", p.accountManager?.name ?? null], ["Status", p.status], ["Plan version", `v${v.version} (${v.status})`], ["Plan approved", tz(v.approvedAt), DT],
-      ["Budget", num(p.budgetAmount), MONEY], ["Currency", p.currency], ["Planned cost (budget currency)", P.budget.totalInBudgetCurrency, MONEY], ["Budget variance", P.budget.variance, MONEY],
+      ...(fin ? [["Budget", num(p.budgetAmount), MONEY], ["Currency", p.currency], ["Planned cost (budget currency)", P.budget.totalInBudgetCurrency, MONEY], ["Budget variance", P.budget.variance, MONEY]] as [string, unknown, string?][] : [["Financial data", "Omitted — requires the budget.read permission"]] as [string, unknown, string?][]),
       ["Schedule feasible", P.schedule.feasible ? "Yes" : "No — see conflicts"], ["Open errors / warnings", `${P.readiness.errors} / ${P.readiness.warnings}`], ["Tasks / critical", `${P.tasks.length} / ${P.schedule.criticalPath.length}`],
       ["Calculation engine", "Deterministic planning engines v" + (P.traces[0]?.engineVersion ?? "1")], ["Times", "Africa/Cairo local time"],
     ];
@@ -172,12 +184,12 @@ export async function buildWorkbook(companyId: string, projectId: string, only?:
   table("17", "Site_Execution_Checklist", "Site execution checklist", [{ header: "✓", key: "chk", width: 5 }, { header: "WBS", key: "wbs", width: 8 }, { header: "Task", key: "name", width: 44 }, { header: "Planned start", key: "start", width: 16, fmt: DT }, { header: "Planned finish", key: "finish", width: 16, fmt: DT }, { header: "Crew", key: "crew" }, { header: "Critical", key: "critical", width: 9 }, { header: "Actual start", key: "aStart", width: 16, fmt: DT }, { header: "Actual finish", key: "aEnd", width: 16, fmt: DT }, { header: "Status", key: "status" }, { header: "Sign-off / notes", key: "sign", width: 30 }],
     ganttRows.filter((r) => ["TRANSPORT", "SETUP", "EVENT", "DISMANTLE"].includes(r.phase)).map((r) => ({ ...r, chk: r.status === "COMPLETED" ? "☑" : "☐", sign: "" })));
   if (include("18")) {
-    const avp = await actualVsPlanned(projectId);
+    const avp = await actualVsPlanned(projectId, fin);
     table("18", "Actual_vs_Planned", "Actual vs planned", [{ header: "Group", key: "group" }, { header: "Item", key: "description", width: 40 }, { header: "Unit", key: "unit" }, { header: "Planned", key: "planned", fmt: N2 }, { header: "Actual", key: "actual", fmt: N2 }, { header: "Variance", key: "variance", fmt: N2 }, { header: "Variance %", key: "vp", fmt: "0.0%" }, { header: "Accuracy %", key: "acc", fmt: "0.0%" }],
       avp.rows.map((r) => ({ ...r, vp: r.variancePct != null ? r.variancePct / 100 : null, acc: r.accuracyPct != null ? r.accuracyPct / 100 : null })), { note: "Accuracy = 1 − |actual − planned| ÷ planned. Failed estimates are shown, not hidden. Baseline: last approved plan." });
   }
   table("19", "Change_Log", "Change log", [{ header: "Date", key: "d", width: 16, fmt: DT }, { header: "Change", key: "title", width: 40 }, { header: "Entity", key: "entity" }, { header: "Fields", key: "fields", width: 40 }, { header: "Impact summary", key: "impact", width: 50 }, { header: "Status", key: "status" }, { header: "Requested by", key: "by", width: 20 }],
-    changes.map((c) => ({ d: tz(c.createdAt), title: c.title, entity: c.entityType, fields: (c.changes as { field: string; from: unknown; to: unknown }[]).map((x) => `${x.field}: ${String(x.from ?? "—")} → ${String(x.to)}`).join("; "), impact: (c.impact as { summary?: string } | null)?.summary ?? null, status: c.status, by: users.get(c.requestedById ?? "") ?? null })));
+    changes.map((c) => ({ d: tz(c.createdAt), title: c.title, entity: c.entityType, fields: (fin ? (c.changes as { field: string; from: unknown; to: unknown }[]) : redactChangeEntries(c.changes as { field: string; from: unknown; to: unknown }[])).map((x) => `${x.field}: ${String(x.from ?? "—")} → ${String(x.to)}`).join("; "), impact: (c.impact as { summary?: string } | null)?.summary ?? null, status: c.status, by: users.get(c.requestedById ?? "") ?? null })));
   table("20", "Approvals", "Approvals", [{ header: "Requested", key: "d", width: 16, fmt: DT }, { header: "Type", key: "type" }, { header: "Item", key: "title", width: 50 }, { header: "Approver role", key: "role", width: 20 }, { header: "Status", key: "status", width: 18 }, { header: "Decided by", key: "by", width: 20 }, { header: "Decided", key: "dd", width: 16, fmt: DT }, { header: "Note", key: "note", width: 40 }],
     approvals.map((a) => ({ d: tz(a.createdAt), type: a.entityType, title: a.title, role: a.requiredRole, status: a.status, by: users.get(a.approverId ?? "") ?? null, dd: tz(a.decidedAt), note: a.decisionNote })));
 

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { EmptyState, StatusBadge, TableWrap } from "@/components/ui/kit";
 import { AvAllocationTable, CuttingPlans, FleetPanel, IssuesPanel, NoPlan, ProductionItemsMetrics, RoomingPanel } from "@/components/planning/panels";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
+import { canReadFinancials } from "@/lib/financial";
 import { AddCargoDialog, BrandingApproval, BrandingDialog, GuestDialog } from "./forms";
 import { DeleteAvRequirement } from "./small-actions";
 
@@ -96,7 +97,8 @@ export async function AccommodationTab({ id }: { id: string }) {
 
 export async function CreativeTab({ id }: { id: string }) {
   const { u, locale, plan } = await projectContext(id);
-  const [items, vendors] = await Promise.all([db.brandingItem.findMany({ where: { projectId: id }, include: { vendor: true }, orderBy: { createdAt: "asc" } }), db.vendor.findMany({ where: { companyId: u.companyId }, select: { id: true, name: true } })]);
+  const [rawItems, vendors] = await Promise.all([db.brandingItem.findMany({ where: { projectId: id }, include: { vendor: true }, orderBy: { createdAt: "asc" } }), db.vendor.findMany({ where: { companyId: u.companyId }, select: { id: true, name: true } })]);
+  const items = canReadFinancials(u) ? rawItems : rawItems.map((b) => ({ ...b, unitCost: null }));
   const editable = canEditDept(u, "CREATIVE");
   return (
     <div className="space-y-5">

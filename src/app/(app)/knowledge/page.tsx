@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
+import { redactRecords } from "@/lib/financial";
 import { db, num } from "@/lib/db";
 import { getDict } from "@/i18n/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ export default async function KnowledgePage() {
   const u = await requireUser();
   const { t, locale } = await getDict();
   const C = u.companyId;
-  const [materials, labor, equipment, vehicles, vendors, hotels, historical, standards, routes] = await Promise.all([
+  const [materials, labor, equipment, vehicles, vendors, hotels, historical, standards, routes] = redactRecords(u, await Promise.all([
     db.material.findMany({ where: { companyId: C }, include: { supplier: true }, orderBy: { code: "asc" } }),
     db.laborCategory.findMany({ where: { companyId: C }, include: { rates: true }, orderBy: { name: "asc" } }),
     db.equipment.findMany({ where: { companyId: C }, include: { inventory: true }, orderBy: { code: "asc" } }),
@@ -23,7 +24,7 @@ export default async function KnowledgePage() {
     db.historicalEvent.findMany({ where: { companyId: C }, orderBy: { eventDate: "desc" } }),
     db.companyStandard.findMany({ where: { companyId: C }, orderBy: [{ key: "asc" }, { version: "desc" }] }),
     db.routeEstimate.findMany({ where: { companyId: C } }),
-  ]);
+  ]));
   const canManage = u.permissions.has("knowledge.manage");
   return (
     <>
