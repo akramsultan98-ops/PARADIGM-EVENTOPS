@@ -1,7 +1,6 @@
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { projectScope } from "@/lib/scope";
-import { getDict } from "@/i18n/server";
 import { actualVsPlanned } from "@/server/queries/execution";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, PageHeader, TableWrap, DemoBanner } from "@/components/ui/kit";
@@ -14,7 +13,6 @@ export const metadata = { title: "Actual vs planned" };
 
 export default async function AvpPage({ searchParams }: { searchParams: Promise<{ project?: string }> }) {
   const u = await requireUser();
-  const { locale } = await getDict();
   const { project } = await searchParams;
   const projects = await db.project.findMany({ where: { ...projectScope(u), scheduleVersions: { some: { status: "APPROVED" } } }, orderBy: { eventStart: "asc" } });
   const current = projects.find((p) => p.id === project) ?? projects[0];

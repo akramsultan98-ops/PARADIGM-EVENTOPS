@@ -41,7 +41,7 @@ npm run db:seed                 # load the connected demo environment (dev only)
 npm run dev                     # http://localhost:3000
 ```
 
-Development demo accounts (only when `ENABLE_DEMO_LOGIN=true`; the seed refuses to run in production):
+Development demo accounts (only when `ENABLE_DEMO_LOGIN=true` in a non-production build; the seed refuses to run in production and refuses to wipe a database that has real user accounts):
 
 | Email | Role |
 |---|---|
@@ -59,15 +59,15 @@ Password: `EventOps!2026` (override with `DEMO_PASSWORD` before seeding).
 ### Docker
 
 ```bash
-cp .env.example .env && docker compose up -d --build                      # app + PostgreSQL
+cp .env.example .env            # set AUTH_SECRET and POSTGRES_PASSWORD; ENABLE_DEMO_LOGIN="false" outside dev
+docker compose up -d --build                                               # app + PostgreSQL (migrations run on start)
 docker compose --profile optimizer up -d                                   # + OR-Tools service
-docker compose exec app node node_modules/prisma/build/index.js migrate deploy
 ```
 
 ## Tests
 
 ```bash
-npm run test:unit          # 69 engine & extraction tests (no database)
+npm run test:unit          # 83 engine, extraction & auth-guard tests (no database)
 npm run test:integration   # service tests against TEST_DATABASE_URL (migrate deploy + demo seed)
 npm run test:e2e           # Playwright: full MVP workflow, security, mobile & Arabic RTL (needs the app running or starts `npm run dev`)
 cd services/optimizer && pytest -q   # OR-Tools solver tests

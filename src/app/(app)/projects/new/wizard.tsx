@@ -127,7 +127,7 @@ export function ProjectWizard({ venues, users, departments, currentUserId }: { v
             </div>
           )}
           {step === 4 && (
-            <KeyValue cols={2} items={[["Project", f.name], ["Client", f.client], ["Category", f.category], ["Participants", f.participants], ["Location", f.location], ["Venue", venues.find((v) => v.id === f.venueId)?.name ?? (f.newVenueName || "TBC")], ["Setup", `${f.setupStart.replace("T", " ")} → ${f.setupEnd.replace("T", " ")}`], ["Event", `${f.eventStart.replace("T", " ")} → ${f.eventEnd.replace("T", " ")}`], ["Departments", f.departments.map((d) => d.key).join(", ") || "None"], ["Budget", f.budgetAmount ? `${f.budgetAmount} ${f.currency}` : "Not set"], ["Requirements", `${f.requirements.filter((r) => r.title).length} line(s)`]]} />
+            <KeyValue cols={2} items={[["Project", f.name], ["Client", f.client], ["Category", f.category], ["Participants", String(f.participants)], ["Location", f.location], ["Venue", venues.find((v) => v.id === f.venueId)?.name ?? (f.newVenueName || "TBC")], ["Setup", `${f.setupStart.replace("T", " ")} → ${f.setupEnd.replace("T", " ")}`], ["Event", `${f.eventStart.replace("T", " ")} → ${f.eventEnd.replace("T", " ")}`], ["Departments", f.departments.map((d) => d.key).join(", ") || "None"], ["Budget", f.budgetAmount ? `${f.budgetAmount} ${f.currency}` : "Not set"], ["Requirements", `${f.requirements.filter((r) => r.title).length} line(s)`]]} />
           )}
         </CardContent>
         <CardFooter className="justify-between">

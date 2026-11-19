@@ -23,6 +23,11 @@ const day = (s: string) => new Date(`${s}T12:00:00Z`);
 const H = 3600000;
 
 async function reset() {
+  // Safety: never wipe a database that has real (non-demo) user accounts unless explicitly forced.
+  const realUsers = await db.user.count({ where: { isDemo: false } });
+  if (realUsers > 0 && process.env.SEED_FORCE_RESET !== "true") {
+    throw new Error(`Refusing to reset: database contains ${realUsers} non-demo user account(s). Seed an empty/dev database, or set SEED_FORCE_RESET=true if you really intend to erase it.`);
+  }
   // development reset: truncate every application table (keeps the migrations table)
   const tables = await db.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;
   if (tables.length) await db.$executeRawUnsafe(`TRUNCATE TABLE ${tables.map((t) => `"${t.tablename}"`).join(", ")} CASCADE`);

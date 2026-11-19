@@ -4,7 +4,10 @@
 - Email + password (bcrypt, cost 12). Session = HS256 JWT (`jose`) in an **HttpOnly, SameSite=Lax** cookie (`Secure` in production), 12 h TTL, signed with `AUTH_SECRET` (≥ 32 chars, required).
 - Every request re-validates the user in the DB: active, not deleted, same company, and `sessionVersion` matches → role changes, deactivation and password resets revoke sessions immediately.
 - Login rate limit: 8 attempts / 10 min per IP+email; failed logins audited.
-- Demo accounts can log in only when `ENABLE_DEMO_LOGIN=true`; the seed refuses to run in production.
+- Demo accounts can log in only when `ENABLE_DEMO_LOGIN=true` **and** the process is not a production build (a production server additionally needs `ALLOW_DEMO_LOGIN_IN_PRODUCTION=true`, intended only for a clearly labelled internal demo server). The demo password is rendered from the server only when demo login is enabled; it is not compiled into the client bundle.
+- The seed refuses to run in production (`ALLOW_DEMO_SEED`) and refuses to wipe a database that contains non-demo user accounts (`SEED_FORCE_RESET`).
+- Login: bcrypt always runs (no account-existence timing signal), rate limited per IP+account and per account, failed logins audited; the post-login `next` parameter accepts same-origin relative paths only.
+- CSV exports neutralise spreadsheet formula injection.
 
 ## Authorisation
 - Role → permission matrix (`src/lib/permissions.ts`), stored in `Role/Permission/RolePermission` and loaded with the session.

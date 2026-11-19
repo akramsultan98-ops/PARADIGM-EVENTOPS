@@ -53,7 +53,7 @@ export async function previewImportAction(form: FormData) {
   });
 }
 
-const commitSchema = z.object({ target: z.enum(["materials", "vendors", "equipment", "historical"]), mapping: z.record(z.string()), rows: z.array(z.record(z.string())).max(5000), skipDuplicates: z.boolean().default(true) });
+const commitSchema = z.object({ target: z.enum(["materials", "vendors", "equipment", "historical"]), mapping: z.record(z.string(), z.string()), rows: z.array(z.record(z.string(), z.string())).max(5000), skipDuplicates: z.boolean().default(true) });
 
 export async function commitImportAction(input: z.input<typeof commitSchema>) {
   return run(async () => {
