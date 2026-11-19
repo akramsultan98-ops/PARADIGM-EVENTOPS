@@ -51,7 +51,7 @@ export function extractRuleBased(text: string): Extraction {
     const coats = /(\d+|one|two|three)\s+coats?/i.exec(t);
     if (coats) { d.paintCoats = n(coats[1]); ev("paintCoats", coats); }
     const day = /(first|second|third|fourth|1st|2nd|3rd|day\s*(\d))\s*(?:setup|set-up|installation)?\s*day|setup day\s*(\d)|day\s*(\d)\s*of\s*setup/i.exec(t);
-    if (day) { const v = day[2] ?? day[3] ?? day[4] ?? day[1].replace(/(st|nd|rd)$/, ""); d.installationDay = n(v); ev("installationDay", day); }
+    if (day) { const v = day[2] ?? day[3] ?? day[4] ?? day[1].replace(/^(\d+)(st|nd|rd|th)$/, "$1"); d.installationDay = n(v); ev("installationDay", day); }
     const qty = /(\d+|two|three|four|five|six|ten|twelve)\s*(?:x\s*)?(?:pcs|pieces|units|identical|nos?\.?)?\s*(?:backdrops|stages|podiums|counters|booths|signs|partitions|walls|tables)\b/i.exec(t);
     if (qty) { d.quantity = n(qty[1]); ev("quantity", qty); }
     const method = /(?:built|constructed|made)\s+(?:as|with|from|using)\s+([^.,;]+)/i.exec(t);

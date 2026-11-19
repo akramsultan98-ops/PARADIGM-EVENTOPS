@@ -34,7 +34,7 @@ export function ExecutionBoard({ projectId, tasks, plannedActuals, canUpdate, no
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card><CardContent className="p-4"><div className="text-2xs text-muted-foreground">Progress</div><div className="font-display text-2xl font-semibold">{tasks.length ? Math.round((done / tasks.length) * 100) : 0}%</div><Progress value={tasks.length ? (done / tasks.length) * 100 : 0} className="mt-1" /></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-2xs text-muted-foreground">In progress</div><div className="font-display text-2xl font-semibold">{tasks.filter((t) => t.status === "IN_PROGRESS").length}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-2xs text-muted-foreground">Delayed / blocked</div><div className="font-display text-2xl font-semibold text-danger">{tasks.filter((t) => ["DELAYED", "BLOCKED"].includes(t.status)).length}</div></CardContent></Card>
