@@ -55,7 +55,7 @@ export async function ProductionWorkspace({ user, projectId }: WS) {
     db.approval.count({ where: { ...pendingApprovalsWhere(user), entityType: { in: ["SUBMISSION", "PRODUCTION_ITEM"] } } }),
   ]);
   const plan = focusPlan?.plan;
-  const awaiting = items.filter((i) => i.state === "NEEDS_INFORMATION" || i.drawingStatus === "MISSING");
+  const awaiting = items.filter((i) => i.calculationState === "NEEDS_INFORMATION" || i.drawingStatus === "MISSING");
   const boards = [...plans.values()].reduce((s, p) => s + p.plan.production.boq.filter((b) => b.category === "BOARD").reduce((a, b) => a + b.purchaseQuantity, 0), 0);
   const workshopHours = [...plans.values()].reduce((s, p) => s + p.plan.trades.filter((x) => x.phase === "WORKSHOP").reduce((a, b) => a + b.totalHours, 0), 0);
   const canAdd = user.permissions.has("submission.create");
@@ -80,7 +80,7 @@ export async function ProductionWorkspace({ user, projectId }: WS) {
             <table className="data-table">
               <thead><tr><th>Item</th><th>Project</th><th className="num">Qty</th><th>W × H × D (m)</th><th>Board</th><th>Drawing</th><th className="num">Components</th><th>Install</th><th>State</th></tr></thead>
               <tbody>{items.map((i) => (
-                <tr key={i.id}><td className="min-w-[180px]"><div className="font-medium">{i.code} {i.name}</div><div className="text-2xs text-muted-foreground">{i.category.toLowerCase()} · {i.finishing ?? "finishing TBC"}</div></td><td className="text-xs"><Link href={`/projects/${i.project.id}/production`} className="hover:text-primary">{i.project.name}</Link></td><td className="num">{i.quantity}</td><td className="whitespace-nowrap text-xs tabular">{i.widthM ?? "?"} × {i.heightM ?? "?"} × {i.depthM ?? "?"}</td><td className="whitespace-nowrap text-xs">{i.boardMaterial?.code ?? "—"}</td><td><StatusBadge status={i.drawingStatus} locale={locale} /></td><td className="num">{i._count.specs}</td><td className="whitespace-nowrap text-xs">{i.installationDay ? `Day ${i.installationDay}` : "—"}</td><td><StatusBadge status={i.state} locale={locale} />{i.engineeringApprovalRequired && <div className="mt-1 text-[10px] text-warning">engineer approval</div>}</td></tr>
+                <tr key={i.id}><td className="min-w-[180px]"><div className="font-medium">{i.code} {i.name}</div><div className="text-2xs text-muted-foreground">{i.category.toLowerCase()} · {i.finishing ?? "finishing TBC"}</div></td><td className="text-xs"><Link href={`/projects/${i.project.id}/production`} className="hover:text-primary">{i.project.name}</Link></td><td className="num">{i.quantity}</td><td className="whitespace-nowrap text-xs tabular">{i.widthM ?? "?"} × {i.heightM ?? "?"} × {i.depthM ?? "?"}</td><td className="whitespace-nowrap text-xs">{i.boardMaterial?.code ?? "—"}</td><td><StatusBadge status={i.drawingStatus} locale={locale} /></td><td className="num">{i._count.specs}</td><td className="whitespace-nowrap text-xs">{i.installationDay ? `Day ${i.installationDay}` : "—"}</td><td><StatusBadge status={i.approvalStatus} locale={locale} /><StatusBadge status={i.calculationState} locale={locale} />{i.engineeringApprovalRequired && <div className="mt-1 text-[10px] text-warning">engineer approval</div>}</td></tr>
               ))}</tbody>
             </table>
           </TableWrap>

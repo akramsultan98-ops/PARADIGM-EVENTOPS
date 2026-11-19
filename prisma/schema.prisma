@@ -241,6 +241,15 @@ enum CostBasis {
   BUDGET
 }
 
+/// Technical approval of a department source record (production item, AV requirement).
+/// Owned by the submission / review / change-request workflow — never written by the planning engines.
+enum SourceApprovalStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
 enum ApprovalStatus {
   PENDING
   APPROVED
@@ -648,13 +657,13 @@ model ExtractedDocumentData {
 // ───────────────────────────── Production & materials ─────────────────────────────
 
 model ProductionItem {
-  id                          String             @id @default(cuid())
+  id                          String               @id @default(cuid())
   projectId                   String
   submissionId                String?
   code                        String
   name                        String
   category                    ProductionCategory
-  quantity                    Int                @default(1)
+  quantity                    Int                  @default(1)
   widthM                      Float?
   heightM                     Float?
   depthM                      Float?
@@ -670,12 +679,15 @@ model ProductionItem {
   packedWeightKg              Float? // optional measured transport weight
   specialTools                String?
   notes                       String?
-  drawingStatus               DrawingStatus      @default(MISSING)
-  state                       DataState          @default(NEEDS_INFORMATION)
-  engineeringApprovalRequired Boolean            @default(false)
+  drawingStatus               DrawingStatus        @default(MISSING)
+  /// Calculation state written by the planning engines (CALCULATED / ESTIMATED / NEEDS_INFORMATION).
+  calculationState            DataState            @default(NEEDS_INFORMATION) @map("state")
+  /// Technical approval — only the submission/review/change-request workflow writes this.
+  approvalStatus              SourceApprovalStatus @default(DRAFT)
+  engineeringApprovalRequired Boolean              @default(false)
   engineeringApprovedBy       String?
-  createdAt                   DateTime           @default(now())
-  updatedAt                   DateTime           @updatedAt
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
 
   project       Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   submission    DepartmentSubmission?     @relation(fields: [submissionId], references: [id])
@@ -904,23 +916,26 @@ model EquipmentInventory {
 }
 
 model EquipmentRequirement {
-  id             String                @id @default(cuid())
-  projectId      String
-  submissionId   String?
-  equipmentId    String?
-  category       EquipmentCategory
-  description    String
-  quantity       Int
-  backupQuantity Int                   @default(0)
-  specs          String?
-  allocatedQty   Int                   @default(0)
-  rentalQty      Int                   @default(0)
-  state          DataState             @default(NEEDS_INFORMATION)
-  notes          String?
-  createdAt      DateTime              @default(now())
-  project        Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  submission     DepartmentSubmission? @relation(fields: [submissionId], references: [id])
-  equipment      Equipment?            @relation(fields: [equipmentId], references: [id])
+  id               String                @id @default(cuid())
+  projectId        String
+  submissionId     String?
+  equipmentId      String?
+  category         EquipmentCategory
+  description      String
+  quantity         Int
+  backupQuantity   Int                   @default(0)
+  specs            String?
+  allocatedQty     Int                   @default(0)
+  rentalQty        Int                   @default(0)
+  /// Calculation state written by the planning engines.
+  calculationState DataState             @default(NEEDS_INFORMATION) @map("state")
+  /// Technical approval — only the submission/review/change-request workflow writes this.
+  approvalStatus   SourceApprovalStatus  @default(DRAFT)
+  notes            String?
+  createdAt        DateTime              @default(now())
+  project          Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  submission       DepartmentSubmission? @relation(fields: [submissionId], references: [id])
+  equipment        Equipment?            @relation(fields: [equipmentId], references: [id])
 
   @@index([projectId])
 }

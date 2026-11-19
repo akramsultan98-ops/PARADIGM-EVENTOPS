@@ -61,14 +61,14 @@ export async function saveProductionSubmissionAction(input: z.input<typeof produ
     // Validate everything BEFORE writing: approved source data changes only through a change request.
     const prior = d.submissionId ? await db.departmentSubmission.findFirstOrThrow({ where: { id: d.submissionId, projectId: p.id, departmentId: dep.id } }) : null;
     if (prior?.status === "APPROVED") throw new Error("This submission is already approved — use a change request to modify it");
-    const approved = await db.productionItem.findMany({ where: { projectId: p.id, code: { in: d.items.map((it) => it.code.toUpperCase()) }, state: "APPROVED" }, select: { code: true } });
+    const approved = await db.productionItem.findMany({ where: { projectId: p.id, code: { in: d.items.map((it) => it.code.toUpperCase()) }, approvalStatus: "APPROVED" }, select: { code: true } });
     if (approved.length) throw new Error(`${approved.map((a) => a.code).join(", ")} ${approved.length > 1 ? "are" : "is"} already approved — use a change request to modify ${approved.length > 1 ? "them" : "it"}`);
     const sub = prior
       ? await db.departmentSubmission.update({ where: { id: prior.id }, data: { title: d.title, status, formStep: d.formStep, missingFields: json(missing), submittedAt: d.submit ? new Date() : undefined, version: { increment: 1 } } })
       : await db.departmentSubmission.create({ data: { projectId: p.id, departmentId: dep.id, submittedById: u.id, title: d.title, method: "FORM", status, formStep: d.formStep, missingFields: json(missing), submittedAt: d.submit ? new Date() : null } });
     for (const it of d.items) {
       const existing = await db.productionItem.findUnique({ where: { projectId_code: { projectId: p.id, code: it.code.toUpperCase() } } });
-      const data = { name: it.name, category: it.category, quantity: it.quantity, widthM: it.widthM, heightM: it.heightM, depthM: it.depthM, packedVolumeM3: it.packedVolumeM3, boardMaterialId: it.boardMaterialId || null, finishing: it.finishing, color: it.color, paintCoats: it.paintCoats, constructionMethod: it.constructionMethod, installationMethod: it.installationMethod, installationDay: it.installationDay, specialTools: it.specialTools, engineeringApprovalRequired: it.engineeringApprovalRequired, notes: it.notes, submissionId: sub.id, drawingStatus: (d.documentIds.length || it.specs.length ? "PROVIDED" : "MISSING") as "PROVIDED" | "MISSING", state: (status === "DRAFT" ? "ESTIMATED" : "UNDER_REVIEW") as "ESTIMATED" | "UNDER_REVIEW" };
+      const data = { name: it.name, category: it.category, quantity: it.quantity, widthM: it.widthM, heightM: it.heightM, depthM: it.depthM, packedVolumeM3: it.packedVolumeM3, boardMaterialId: it.boardMaterialId || null, finishing: it.finishing, color: it.color, paintCoats: it.paintCoats, constructionMethod: it.constructionMethod, installationMethod: it.installationMethod, installationDay: it.installationDay, specialTools: it.specialTools, engineeringApprovalRequired: it.engineeringApprovalRequired, notes: it.notes, submissionId: sub.id, drawingStatus: (d.documentIds.length || it.specs.length ? "PROVIDED" : "MISSING") as "PROVIDED" | "MISSING", calculationState: "ESTIMATED" as const, approvalStatus: (status === "SUBMITTED" ? "UNDER_REVIEW" : "DRAFT") as "UNDER_REVIEW" | "DRAFT" };
       const item = existing ? await db.productionItem.update({ where: { id: existing.id }, data }) : await db.productionItem.create({ data: { ...data, projectId: p.id, code: it.code.toUpperCase() } });
       await db.productionSpecification.deleteMany({ where: { productionItemId: item.id } });
       if (it.specs.length) await db.productionSpecification.createMany({ data: it.specs.map((s) => ({ productionItemId: item.id, kind: s.kind, label: s.label, materialId: s.materialId || null, lengthM: s.lengthM, widthM: s.widthM, quantity: s.quantity, sides: s.sides, coats: s.coats, drawingRef: s.drawingRef || null })) });
@@ -133,6 +133,8 @@ export async function submitSubmissionAction(submissionId: string) {
     const missing = (s.missingFields as unknown[] | null) ?? [];
     if (s.method === "AI_CONVERSATION" && missing.length) throw new Error("Complete and confirm the extracted information before submitting");
     await db.departmentSubmission.update({ where: { id: s.id }, data: { status: "SUBMITTED", submittedAt: new Date() } });
+    await db.productionItem.updateMany({ where: { submissionId: s.id, approvalStatus: { in: ["DRAFT", "REJECTED"] } }, data: { approvalStatus: "UNDER_REVIEW" } });
+    await db.equipmentRequirement.updateMany({ where: { submissionId: s.id, approvalStatus: { in: ["DRAFT", "REJECTED"] } }, data: { approvalStatus: "UNDER_REVIEW" } });
     await db.projectDepartment.updateMany({ where: { projectId: s.projectId, departmentId: s.departmentId }, data: { status: "SUBMITTED" } });
     await requestReview(u, s.projectId, s.id, s.department.key, s.title);
     await audit({ companyId: u.companyId, userId: u.id, projectId: s.projectId, action: "SUBMISSION_SUBMITTED", entityType: "DepartmentSubmission", entityId: s.id });
@@ -151,9 +153,13 @@ export async function reviewSubmissionAction(submissionId: string, decision: "AP
     const others = await db.departmentSubmission.findMany({ where: { projectId: s.projectId, departmentId: s.departmentId, id: { not: s.id }, status: { notIn: ["APPROVED", "REJECTED"] } } });
     await db.projectDepartment.updateMany({ where: { projectId: s.projectId, departmentId: s.departmentId }, data: { status: decision === "APPROVED" && others.length ? others[0].status : decision } });
     if (decision === "APPROVED") {
-      await db.productionItem.updateMany({ where: { submissionId: s.id, state: { in: ["UNDER_REVIEW", "ESTIMATED"] } }, data: { state: "APPROVED" } });
+      await db.productionItem.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: "APPROVED" } });
       await db.productionItem.updateMany({ where: { submissionId: s.id, drawingStatus: "PROVIDED" }, data: { drawingStatus: "APPROVED" } });
-      await db.equipmentRequirement.updateMany({ where: { submissionId: s.id }, data: { state: "APPROVED" } });
+      await db.equipmentRequirement.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: "APPROVED" } });
+    } else {
+      const to = decision === "REJECTED" ? "REJECTED" : "DRAFT";
+      await db.productionItem.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: to } });
+      await db.equipmentRequirement.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: to } });
     }
     await db.approval.updateMany({ where: { entityType: "SUBMISSION", entityId: s.id, status: "PENDING" }, data: { status: decision === "APPROVED" ? "APPROVED" : decision === "REJECTED" ? "REJECTED" : "CHANGES_REQUESTED", approverId: u.id, decidedAt: new Date(), decisionNote: note || null } });
     await notify({ userIds: [s.submittedById] }, { companyId: u.companyId, projectId: s.projectId, type: "APPROVAL", title: `${s.title}: ${decision.replace("_", " ").toLowerCase()}`, body: note || undefined, link: `/projects/${s.projectId}/inputs?submission=${s.id}` });
@@ -173,7 +179,7 @@ export async function saveAvRequirementsAction(input: z.input<typeof avSchema>) 
     const dep = await dept(u, "AV");
     const eqIds = new Set((await db.equipment.findMany({ where: { companyId: u.companyId }, select: { id: true } })).map((e) => e.id));
     const sub = await db.departmentSubmission.create({ data: { projectId: p.id, departmentId: dep.id, submittedById: u.id, title: `AV requirements (${d.lines.length} lines)`, method: "FORM", status: d.submit ? "SUBMITTED" : "DRAFT", submittedAt: d.submit ? new Date() : null } });
-    for (const l of d.lines) await db.equipmentRequirement.create({ data: { projectId: p.id, submissionId: sub.id, equipmentId: l.equipmentId && eqIds.has(l.equipmentId) ? l.equipmentId : null, category: l.category as never, description: l.description, quantity: l.quantity, backupQuantity: l.backupQuantity, specs: l.specs } });
+    for (const l of d.lines) await db.equipmentRequirement.create({ data: { projectId: p.id, submissionId: sub.id, equipmentId: l.equipmentId && eqIds.has(l.equipmentId) ? l.equipmentId : null, category: l.category as never, description: l.description, quantity: l.quantity, backupQuantity: l.backupQuantity, specs: l.specs, approvalStatus: d.submit ? "UNDER_REVIEW" : "DRAFT" } });
     await markDeptInProgress(p.id, dep.id);
     if (d.submit) { await db.projectDepartment.updateMany({ where: { projectId: p.id, departmentId: dep.id }, data: { status: "SUBMITTED" } }); await requestReview(u, p.id, sub.id, "AV", sub.title); }
     await audit({ companyId: u.companyId, userId: u.id, projectId: p.id, action: "AV_INPUT_SAVED", entityType: "DepartmentSubmission", entityId: sub.id });
@@ -187,7 +193,7 @@ export async function deleteAvRequirementAction(id: string) {
     const u = await requireUser();
     const r = await db.equipmentRequirement.findFirstOrThrow({ where: { id, project: projectScope(u) } });
     guardEdit(u, "AV");
-    if (r.state === "APPROVED") throw new Error("Approved requirements can only change through a change request");
+    if (r.approvalStatus === "APPROVED") throw new Error("Approved requirements can only change through a change request");
     await db.equipmentRequirement.delete({ where: { id } });
     revalidatePath(`/projects/${r.projectId}/av`);
   }, "Requirement removed");

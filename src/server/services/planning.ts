@@ -61,9 +61,9 @@ export async function generatePlan(ctx: Ctx, projectId: string, opts: { asOf?: D
       await tx.cuttingPlan.create({ data: { projectId, materialId: c.materialId, boardsUsed: c.result.boardsUsed, utilizationPct: c.result.utilizationPct, kerfMm: (c.result.trace.inputs as { board: { kerfMm: number } }).board.kerfMm, layout: json(c.result.layouts), unplaced: json(c.result.unplaced), calculationId: traceIds[ti] ?? null } });
     }
 
-    // item / requirement states
-    for (const m of plan.production.items) await tx.productionItem.update({ where: { id: m.itemId }, data: { state: m.state } });
-    for (const l of plan.av.lines) await tx.equipmentRequirement.update({ where: { id: l.requirementId }, data: { allocatedQty: l.allocated, rentalQty: l.rental, state: l.state } });
+    // calculation states only — technical approval (approvalStatus) is owned by the review workflow and is never touched here
+    for (const m of plan.production.items) await tx.productionItem.update({ where: { id: m.itemId }, data: { calculationState: m.state } });
+    for (const l of plan.av.lines) await tx.equipmentRequirement.update({ where: { id: l.requirementId }, data: { allocatedQty: l.allocated, rentalQty: l.rental, calculationState: l.state } });
 
     // tasks — while executing, keep task records (status/actuals) and update dates only
     const depts = await tx.department.findMany({ where: { companyId: ctx.companyId } });

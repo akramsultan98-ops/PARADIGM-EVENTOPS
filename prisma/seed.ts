@@ -326,6 +326,12 @@ async function main() {
   await db.notification.create({ data: { companyId: C, userId: U("PROJECT_MANAGER"), projectId: cai.id, type: "DELAY", title: "Line-array installation delayed 2 h — Cairo Product Launch", link: `/execution?project=${cai.id}` } });
   await db.notification.create({ data: { companyId: C, userId: U("FINANCE"), projectId: A, type: "APPROVAL", title: "Purchase request MAT:PLY-18 awaiting your approval", link: "/approvals" } });
 
+  // technical approval follows the seeded submission decisions (never derived from calculation state)
+  await db.productionItem.updateMany({ where: { submission: { status: "APPROVED" } }, data: { approvalStatus: "APPROVED" } });
+  await db.equipmentRequirement.updateMany({ where: { submission: { status: "APPROVED" } }, data: { approvalStatus: "APPROVED" } });
+  await db.productionItem.updateMany({ where: { submission: { status: { in: ["SUBMITTED", "UNDER_REVIEW"] } } }, data: { approvalStatus: "UNDER_REVIEW" } });
+  await db.equipmentRequirement.updateMany({ where: { submission: { status: { in: ["SUBMITTED", "UNDER_REVIEW"] } } }, data: { approvalStatus: "UNDER_REVIEW" } });
+
   const counts = { users: await db.user.count(), projects: await db.project.count(), tasks: await db.task.count(), calcs: await db.calculationRecord.count(), risks: await db.risk.count(), approvals: await db.approval.count({ where: { status: "PENDING" } }) };
   console.log("✔ Seed complete", counts);
   console.log(`\nDevelopment demo accounts (password: ${DEMO_PASSWORD}):\n${userDefs.map((u) => `  ${u.email.padEnd(40)} ${ROLE_LABELS[u.role]}`).join("\n")}\n`);

@@ -33,7 +33,7 @@ describe("approved production source data is immutable outside change requests",
     const submissionId = (first as { data: { submissionId: string } }).data.submissionId;
     // technical approval (what reviewSubmissionAction does)
     await db.departmentSubmission.update({ where: { id: submissionId }, data: { status: "APPROVED" } });
-    await db.productionItem.updateMany({ where: { submissionId }, data: { state: "APPROVED" } });
+    await db.productionItem.updateMany({ where: { submissionId }, data: { approvalStatus: "APPROVED" } });
     const before = await db.productionItem.findFirstOrThrow({ where: { projectId, code } });
 
     const edit = await saveProductionSubmissionAction({ projectId, submissionId, title: "Guard test submission", items: [item(code, 9)], submit: true });
@@ -42,7 +42,7 @@ describe("approved production source data is immutable outside change requests",
 
     const after = await db.productionItem.findFirstOrThrow({ where: { projectId, code } });
     expect(after.widthM).toBe(before.widthM);
-    expect(after.state).toBe("APPROVED");
+    expect(after.approvalStatus).toBe("APPROVED");
     expect((await db.departmentSubmission.findUniqueOrThrow({ where: { id: submissionId } })).status).toBe("APPROVED");
   });
 
@@ -51,7 +51,7 @@ describe("approved production source data is immutable outside change requests",
     const code = `GRD2-${Date.now().toString(36).toUpperCase()}`;
     const first = await saveProductionSubmissionAction({ projectId, title: "Guard test 2", items: [item(code, 4)], submit: false });
     const submissionId = (first as { data: { submissionId: string } }).data.submissionId;
-    await db.productionItem.updateMany({ where: { submissionId }, data: { state: "APPROVED" } });
+    await db.productionItem.updateMany({ where: { submissionId }, data: { approvalStatus: "APPROVED" } });
     const edit = await saveProductionSubmissionAction({ projectId, submissionId, title: "Guard test 2", items: [item(code, 7)], submit: false });
     expect(edit.ok).toBe(false);
     expect((await db.productionItem.findFirstOrThrow({ where: { projectId, code } })).widthM).toBe(4);

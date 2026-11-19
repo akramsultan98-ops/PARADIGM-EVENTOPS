@@ -28,7 +28,7 @@ export async function applyApprovedChange(changeId: string, companyId: string) {
   for (const c of changes) data[c.field] = ["eventStart", "eventEnd", "setupStart"].includes(c.field) ? fromLocalInput(String(c.to)) : c.field === "available" ? c.to === true || c.to === "true" : Number(c.to);
   if (ch.entityType === "ProductionItem") {
     const before = await db.productionItem.findUniqueOrThrow({ where: { id: ch.entityId! }, include: { specs: true } });
-    await db.productionItem.update({ where: { id: ch.entityId! }, data: { ...data, drawingStatus: "PROVIDED", state: "UNDER_REVIEW", notes: `${before.notes ?? ""}\nChanged by approved change request "${ch.title}" — revised drawing required.`.trim() } });
+    await db.productionItem.update({ where: { id: ch.entityId! }, data: { ...data, drawingStatus: "PROVIDED", calculationState: "ESTIMATED", notes: `${before.notes ?? ""}\nChanged by approved change request "${ch.title}" — revised drawing required.`.trim() } });
     // revised component list must come from the revised drawing; scale proportionally only as a flagged estimate
     const fw = data.widthM && before.widthM ? Number(data.widthM) / before.widthM : 1;
     const fh = data.heightM && before.heightM ? Number(data.heightM) / before.heightM : 1;
