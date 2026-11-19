@@ -44,6 +44,9 @@ export interface LogisticsResult {
 
 const overlaps = (a0: Date, a1: Date, b0: Date, b1: Date) => a0 < b1 && b0 < a1;
 
+/** Upper bound on individual cargo units expanded by the packer (P2-E). Mirrors LIMITS.maxCargoUnits. */
+export const MAX_CARGO_UNITS = 10000;
+
 export function planTransport(
   cargo: CargoLine[],
   vehicles: VehicleSnap[],
@@ -64,9 +67,19 @@ export function planTransport(
   // expand to packable units
   type Unit = { key: string; name: string; w: number; v: number; dim: number | null; fragile: boolean };
   const units: Unit[] = [];
+  const totalUnits = cargo.reduce((s, c) => s + (Number.isInteger(c.quantity) && c.quantity > 0 ? c.quantity : 0), 0);
   for (const c of cargo) {
     if (c.unitWeightKg == null || c.unitVolumeM3 == null) {
       unassigned.push({ key: c.key, name: c.name, reason: "Weight or volume unknown — cannot be allocated to a vehicle" });
+      continue;
+    }
+    // a non-positive weight/volume would make a vehicle look lighter than it is — never pack it (P2-E)
+    if (!(c.unitWeightKg > 0 && c.unitVolumeM3 > 0 && Number.isInteger(c.quantity) && c.quantity > 0) || (c.maxDimM != null && !(c.maxDimM > 0))) {
+      unassigned.push({ key: c.key, name: c.name, reason: `Invalid weight/volume/quantity (${c.unitWeightKg} kg, ${c.unitVolumeM3} m³, ×${c.quantity}) — correct the cargo record` });
+      continue;
+    }
+    if (totalUnits > MAX_CARGO_UNITS) {
+      unassigned.push({ key: c.key, name: c.name, reason: `Cargo list expands to ${totalUnits} units (limit ${MAX_CARGO_UNITS}) — group units into packages` });
       continue;
     }
     for (let i = 0; i < c.quantity; i++) units.push({ key: c.key, name: c.name, w: c.unitWeightKg, v: c.unitVolumeM3, dim: c.maxDimM, fragile: c.fragile });
@@ -124,7 +137,9 @@ export function planTransport(
 
   // backup: smallest remaining vehicle able to take over the heaviest single load
   const worst = bins.reduce<Bin | null>((m, b) => (!m || b.v > m.v ? b : m), null);
-  const backup = worst ? unused.filter((v) => worst.w <= cap(v).w && worst.v <= cap(v).v).sort((x, y) => x.volumeM3 - y.volumeM3)[0] ?? null : null;
+  // the standby vehicle must be able to carry the load it replaces — payload, volume AND the longest piece (Codex finding)
+  const worstLongest = worst ? Math.max(0, ...worst.units.map((u) => u.dim ?? 0)) : 0;
+  const backup = worst ? unused.filter((v) => worst.w <= cap(v).w && worst.v <= cap(v).v && worstLongest <= maxLen(v)).sort((x, y) => x.volumeM3 - y.volumeM3)[0] ?? null : null;
   if (bins.length && !backup) issues.push({ severity: "warning", code: "NO_BACKUP_VEHICLE", department: "LOGISTICS", message: "No available backup vehicle can replace the largest loaded vehicle — arrange a standby rental" });
   if (trips.length > opts.driversAvailable) issues.push({ severity: "error", code: "DRIVER_SHORTAGE", department: "LOGISTICS", message: `${trips.length} vehicles planned but only ${opts.driversAvailable} drivers available` });
 

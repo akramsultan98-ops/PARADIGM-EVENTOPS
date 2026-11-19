@@ -12,9 +12,10 @@ import { DEPARTMENT_APPROVER_ROLE } from "@/lib/permissions";
 import { extractInput } from "@/ai/extract";
 import { missingProduction } from "@/ai/validate";
 import { run } from "./_util";
+import { EquipmentCategory } from "@prisma/client";
+import { LIMITS, optInt, optNonNegative, optPositive } from "@/lib/validation";
 
 const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
-const optNum = z.union([z.string(), z.number()]).optional().nullable().transform((v) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v)));
 
 async function scoped(projectId: string) {
   const u = await requireUser();
@@ -34,13 +35,13 @@ async function markDeptInProgress(projectId: string, departmentId: string) {
 }
 
 // ───────────── Production structured form (multi-step wizard) ─────────────
-const specSchema = z.object({ kind: z.enum(["PANEL", "FRAME_MEMBER", "PAINT_SURFACE", "ACCESSORY"]), label: z.string().min(1).max(120), materialId: z.string().optional().nullable(), lengthM: optNum, widthM: optNum, quantity: z.coerce.number().int().min(1).max(100000), sides: z.coerce.number().int().min(1).max(2).default(1), coats: optNum, drawingRef: z.string().max(120).optional().nullable() });
+const specSchema = z.object({ kind: z.enum(["PANEL", "FRAME_MEMBER", "PAINT_SURFACE", "ACCESSORY"]), label: z.string().min(1).max(120), materialId: z.string().optional().nullable(), lengthM: optPositive(LIMITS.maxDimensionM, "Component length (m)"), widthM: optPositive(LIMITS.maxDimensionM, "Component width (m)"), quantity: z.coerce.number().int().min(1).max(LIMITS.maxPiecesPerSubmission), sides: z.coerce.number().int().min(1).max(2).default(1), coats: optInt(1, 10, "Coats"), drawingRef: z.string().max(120).optional().nullable() });
 const itemSchema = z.object({
   code: z.string().trim().min(2).max(24).regex(/^[A-Za-z0-9-]+$/), name: z.string().trim().min(2).max(160),
   category: z.enum(["STAGE", "BACKDROP", "PODIUM", "BOOTH", "COUNTER", "FURNITURE", "DECORATIVE", "SIGNAGE", "CARPENTRY", "PAINTING", "BRANDING_INSTALL", "FLOORING", "OTHER"]),
-  quantity: z.coerce.number().int().min(1).max(1000), widthM: optNum, heightM: optNum, depthM: optNum, packedVolumeM3: optNum,
-  boardMaterialId: z.string().optional().nullable(), finishing: z.string().max(200).optional().nullable(), color: z.string().max(60).optional().nullable(), paintCoats: optNum,
-  constructionMethod: z.string().max(500).optional().nullable(), installationMethod: z.string().max(500).optional().nullable(), installationDay: optNum, specialTools: z.string().max(300).optional().nullable(),
+  quantity: z.coerce.number().int().min(1).max(1000), widthM: optPositive(LIMITS.maxDimensionM, "Width (m)"), heightM: optPositive(LIMITS.maxDimensionM, "Height (m)"), depthM: optPositive(LIMITS.maxDimensionM, "Depth (m)"), packedVolumeM3: optPositive(LIMITS.maxPackedVolumeM3, "Packed volume (m³)"),
+  boardMaterialId: z.string().optional().nullable(), finishing: z.string().max(200).optional().nullable(), color: z.string().max(60).optional().nullable(), paintCoats: optInt(1, 10, "Paint coats"),
+  constructionMethod: z.string().max(500).optional().nullable(), installationMethod: z.string().max(500).optional().nullable(), installationDay: optInt(1, 60, "Installation day"), specialTools: z.string().max(300).optional().nullable(),
   engineeringApprovalRequired: z.boolean().default(false), notes: z.string().max(2000).optional().nullable(), specs: z.array(specSchema).max(200).default([]),
 });
 const productionSubmission = z.object({ projectId: z.string(), submissionId: z.string().optional(), title: z.string().min(3).max(200), items: z.array(itemSchema).min(1).max(50), submit: z.boolean(), formStep: z.number().int().min(1).max(10).default(10), documentIds: z.array(z.string()).default([]) });
@@ -52,6 +53,8 @@ export async function saveProductionSubmissionAction(input: z.input<typeof produ
     guardEdit(u, "PRODUCTION");
     if (d.submit) assertCan(u, "submission.submit");
     const dep = await dept(u, "PRODUCTION");
+    const pieces = d.items.reduce((s, it) => s + it.quantity * it.specs.reduce((t, sp) => t + sp.quantity, 0), 0);
+    if (pieces > LIMITS.maxPiecesPerSubmission) throw new Error(`This submission expands to ${pieces.toLocaleString()} individual pieces (limit ${LIMITS.maxPiecesPerSubmission.toLocaleString()}). Split it or check the quantities.`);
     const mats = new Set((await db.material.findMany({ where: { companyId: u.companyId }, select: { id: true } })).map((m) => m.id));
     for (const it of d.items) {
       if (it.boardMaterialId && !mats.has(it.boardMaterialId)) throw new Error("Unknown board material");
@@ -157,7 +160,7 @@ export async function reviewSubmissionAction(submissionId: string, decision: "AP
 }
 
 // ───────────── AV requirements ─────────────
-const avSchema = z.object({ projectId: z.string(), submit: z.boolean().default(false), lines: z.array(z.object({ equipmentId: z.string().optional().nullable(), category: z.string(), description: z.string().min(2).max(200), quantity: z.coerce.number().int().min(1).max(10000), backupQuantity: z.coerce.number().int().min(0).max(1000).default(0), specs: z.string().max(500).optional().nullable() })).min(1).max(100) });
+const avSchema = z.object({ projectId: z.string(), submit: z.boolean().default(false), lines: z.array(z.object({ equipmentId: z.string().optional().nullable(), category: z.nativeEnum(EquipmentCategory), description: z.string().min(2).max(200), quantity: z.coerce.number().int().min(1).max(10000), backupQuantity: z.coerce.number().int().min(0).max(1000).default(0), specs: z.string().max(500).optional().nullable() })).min(1).max(100) });
 export async function saveAvRequirementsAction(input: z.input<typeof avSchema>) {
   return run(async () => {
     const d = avSchema.parse(input);
@@ -187,7 +190,7 @@ export async function deleteAvRequirementAction(id: string) {
 }
 
 // ───────────── Logistics cargo, accommodation, creative ─────────────
-const cargoSchema = z.object({ projectId: z.string(), name: z.string().min(2).max(160), quantity: z.coerce.number().int().min(1), lengthM: optNum, widthM: optNum, heightM: optNum, unitWeightKg: optNum, fragile: z.boolean().default(false), handlingNotes: z.string().max(300).optional() });
+const cargoSchema = z.object({ projectId: z.string(), name: z.string().min(2).max(160), quantity: z.coerce.number().int().min(1).max(LIMITS.maxCargoUnits), lengthM: optPositive(LIMITS.maxCargoDimensionM, "Length (m)"), widthM: optPositive(LIMITS.maxCargoDimensionM, "Width (m)"), heightM: optPositive(LIMITS.maxCargoDimensionM, "Height (m)"), unitWeightKg: optPositive(LIMITS.maxUnitWeightKg, "Unit weight (kg)"), fragile: z.boolean().default(false), handlingNotes: z.string().max(300).optional() });
 export async function addCargoAction(input: z.input<typeof cargoSchema>) {
   return run(async () => {
     const d = cargoSchema.parse(input);
@@ -208,6 +211,10 @@ export async function saveGuestAction(input: z.input<typeof guestSchema>) {
     if (d.checkIn && d.checkOut && d.checkOut <= d.checkIn) throw new Error("Check-out must be after check-in");
     if (d.bookingStatus === "CONFIRMED" && !d.confirmationRef) throw new Error("A confirmation reference is required for confirmed bookings");
     if (d.hotelId) await db.hotel.findFirstOrThrow({ where: { id: d.hotelId, companyId: u.companyId } });
+    if (d.roomTypeId) {
+      if (!d.hotelId) throw new Error("Select the hotel for this room type");
+      await db.roomType.findFirstOrThrow({ where: { id: d.roomTypeId, hotelId: d.hotelId, hotel: { companyId: u.companyId } } }).catch(() => { throw new Error("Room type does not belong to the selected hotel"); });
+    }
     const dep = d.departmentKey ? await db.department.findFirst({ where: { companyId: u.companyId, key: d.departmentKey } }) : null;
     const data = { guestName: d.guestName || null, employeeCode: d.employeeCode || null, departmentId: dep?.id ?? null, jobRole: d.jobRole || null, hotelId: d.hotelId || null, roomTypeId: d.roomTypeId || null, roomLabel: d.roomLabel || null, sharedRoom: !!d.roomLabel, checkIn: d.checkIn ? new Date(`${d.checkIn}T12:00:00Z`) : null, checkOut: d.checkOut ? new Date(`${d.checkOut}T12:00:00Z`) : null, arrivalDate: d.checkIn ? new Date(`${d.checkIn}T12:00:00Z`) : null, bookingStatus: d.bookingStatus, confirmationRef: d.confirmationRef || null, specialRequests: d.specialRequests || null };
     if (d.id) await db.accommodationAssignment.update({ where: { id: (await db.accommodationAssignment.findFirstOrThrow({ where: { id: d.id, projectId: p.id } })).id }, data });
@@ -218,7 +225,7 @@ export async function saveGuestAction(input: z.input<typeof guestSchema>) {
   }, "Rooming list updated");
 }
 
-const brandingSchema = z.object({ projectId: z.string(), name: z.string().min(2).max(160), widthM: optNum, heightM: optNum, quantity: optNum, material: z.string().max(120).optional(), printMethod: z.string().max(120).optional(), installationMethod: z.string().max(200).optional(), vendorId: z.string().optional().nullable(), leadTimeDays: optNum, unitCost: optNum, clientApprovalDeadline: z.string().optional().nullable(), deliveryDeadline: z.string().optional().nullable() });
+const brandingSchema = z.object({ projectId: z.string(), name: z.string().min(2).max(160), widthM: optPositive(LIMITS.maxDimensionM, "Width (m)"), heightM: optPositive(LIMITS.maxDimensionM, "Height (m)"), quantity: optInt(1, 100000, "Quantity"), material: z.string().max(120).optional(), printMethod: z.string().max(120).optional(), installationMethod: z.string().max(200).optional(), vendorId: z.string().optional().nullable(), leadTimeDays: optInt(0, 365, "Lead time (days)"), unitCost: optNonNegative(1e9, "Unit cost"), clientApprovalDeadline: z.string().optional().nullable(), deliveryDeadline: z.string().optional().nullable() });
 export async function addBrandingAction(input: z.input<typeof brandingSchema>) {
   return run(async () => {
     const d = brandingSchema.parse(input);
@@ -247,7 +254,7 @@ export async function addRequirementAction(projectId: string, input: { category:
   return run(async () => {
     const { u, p } = await scoped(projectId);
     assertCan(u, "project.edit");
-    const d = z.object({ category: z.string().min(2).max(40), title: z.string().min(2).max(300), quantity: optNum, unit: z.string().max(30).optional() }).parse(input);
+    const d = z.object({ category: z.string().min(2).max(40), title: z.string().min(2).max(300), quantity: optNonNegative(1e7, "Quantity"), unit: z.string().max(30).optional() }).parse(input);
     await db.eventRequirement.create({ data: { projectId: p.id, category: d.category, title: d.title, quantity: d.quantity, unit: d.unit || null } });
     revalidatePath(`/projects/${p.id}/brief`);
   }, "Requirement added");

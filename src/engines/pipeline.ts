@@ -171,10 +171,10 @@ export function runPlanningPipeline(snap: ProjectSnapshot): PlanResult {
   const setupMs = p.eventStart.getTime() - st.setupBufferHours * HOUR_MS - p.setupStart.getTime();
   const siteDays = Math.max(0, siteCal.workBetween(p.setupStart.getTime(), p.eventStart.getTime() - st.setupBufferHours * HOUR_MS) / siteHoursPerDay);
   const windows: Record<LaborPhase, PhaseWindow> = {
-    WORKSHOP: { days: workshopDays, productiveHoursPerDay: null, label: `${workshopDays} workshop day(s) before load-out` },
-    LOADOUT: { days: 1, productiveHoursPerDay: null, label: "Load-out day" },
-    SITE: { days: round(siteDays, 2), productiveHoursPerDay: siteHoursPerDay, label: `${round(siteDays, 2)} setup day(s) × ${siteHoursPerDay} h venue access` },
-    DISMANTLE: { days: 1, productiveHoursPerDay: siteHoursPerDay, label: "Dismantle day" },
+    WORKSHOP: { days: workshopDays, productiveHoursPerDay: null, label: `${workshopDays} workshop day(s) before load-out`, start: asOf, end: workshopWindowEnd },
+    LOADOUT: { days: 1, productiveHoursPerDay: null, label: "Load-out day", start: workshopWindowEnd, end: workshopWindowEnd + DAY },
+    SITE: { days: round(siteDays, 2), productiveHoursPerDay: siteHoursPerDay, label: `${round(siteDays, 2)} setup day(s) × ${siteHoursPerDay} h venue access`, start: p.setupStart.getTime(), end: p.eventStart.getTime() },
+    DISMANTLE: { days: 1, productiveHoursPerDay: siteHoursPerDay, label: "Dismantle day", start: p.eventEnd.getTime(), end: (p.dismantleEnd ?? new Date(p.eventEnd.getTime() + DAY)).getTime() },
   };
   traces.push(trace({ engine: "planning.windows", title: "Phase working windows", formula: "Working days from calendars (workshop days, venue access hours)", inputs: { asOf: snap.asOf, setupStart: p.setupStart, eventStart: p.eventStart, routeHours, accessOpen, accessClose, workshopWorkdays: st.workshopWorkdays }, outputs: windows as unknown as Record<string, unknown>, assumptions: [`Setup buffer before event start: ${st.setupBufferHours} h`, routeHours == null ? "Travel time unknown — workshop window assumes departure on setup day" : `Travel ${routeHours} h`], units: "days", state: routeHours == null ? "NEEDS_INFORMATION" : "CALCULATED" }));
   if (setupMs <= 0) issues.push({ severity: "error", code: "NO_SETUP_TIME", department: "PMO", message: "No setup time remains before the event start (after buffer)" });

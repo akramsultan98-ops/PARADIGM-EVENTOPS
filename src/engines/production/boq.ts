@@ -118,7 +118,7 @@ export function calculateProduction(items: ProductionItemSnap[], materials: Mate
     let panelArea = 0;
     for (const p of panels) {
       const mId = p.materialId ?? it.boardMaterialId;
-      if (!mId || p.lengthM == null || p.widthM == null) {
+      if (!mId || p.lengthM == null || p.widthM == null || !(p.lengthM > 0 && p.widthM > 0 && p.quantity > 0)) {
         issues.push({ severity: "error", code: "PROD_PANEL_INCOMPLETE", department: "PRODUCTION", subjectType: "ProductionItem", subjectId: it.id, message: `${it.code} panel "${p.label}" is missing material or dimensions` });
         state = "NEEDS_INFORMATION";
         continue;
@@ -138,7 +138,7 @@ export function calculateProduction(items: ProductionItemSnap[], materials: Mate
 
     let frameLen = 0;
     for (const f of members) {
-      if (!f.materialId || f.lengthM == null) {
+      if (!f.materialId || f.lengthM == null || !(f.lengthM > 0 && f.quantity > 0)) {
         issues.push({ severity: "error", code: "PROD_MEMBER_INCOMPLETE", department: "PRODUCTION", subjectType: "ProductionItem", subjectId: it.id, message: `${it.code} frame member "${f.label}" is missing material or length` });
         continue;
       }
@@ -152,7 +152,7 @@ export function calculateProduction(items: ProductionItemSnap[], materials: Mate
     let paintArea = 0;
     let coatedArea = 0;
     for (const p of paints) {
-      if (!p.materialId || p.lengthM == null || p.widthM == null) {
+      if (!p.materialId || p.lengthM == null || p.widthM == null || !(p.lengthM > 0 && p.widthM > 0 && p.quantity > 0 && p.sides > 0)) {
         issues.push({ severity: "error", code: "PROD_PAINT_INCOMPLETE", department: "PRODUCTION", subjectType: "ProductionItem", subjectId: it.id, message: `${it.code} paint surface "${p.label}" is missing product or dimensions` });
         continue;
       }

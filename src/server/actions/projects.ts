@@ -10,9 +10,9 @@ import { notify } from "@/lib/notify";
 import { fromLocalInput } from "@/lib/format";
 import { generatePlan } from "@/server/services/planning";
 import { run } from "./_util";
+import { optNonNegative } from "@/lib/validation";
 
 const dateStr = z.string().min(10);
-const numish = z.union([z.string(), z.number()]).optional().nullable().transform((v) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v)));
 const projectSchema = z.object({
   name: z.string().trim().min(3).max(160),
   client: z.string().trim().min(2).max(160),
@@ -25,15 +25,15 @@ const projectSchema = z.object({
   newVenueCity: z.string().max(80).optional(),
   accessOpens: z.string().regex(/^\d{2}:\d{2}$/).optional().or(z.literal("")),
   accessCloses: z.string().regex(/^\d{2}:\d{2}$/).optional().or(z.literal("")),
-  powerCapacityKw: numish,
+  powerCapacityKw: optNonNegative(100000, "Power capacity (kW)"),
   eventStart: dateStr, eventEnd: dateStr, setupStart: dateStr, setupEnd: dateStr,
   dismantleStart: z.string().optional(), dismantleEnd: z.string().optional(),
-  budgetAmount: numish,
+  budgetAmount: optNonNegative(1e12, "Budget"),
   currency: z.string().length(3).default("EGP"),
   projectManagerId: z.string().optional(),
   accountManagerId: z.string().optional(),
   departments: z.array(z.object({ key: z.string(), leadId: z.string().optional(), dueDate: z.string().optional() })).default([]),
-  requirements: z.array(z.object({ category: z.string(), title: z.string().min(2), quantity: numish, unit: z.string().optional() })).default([]),
+  requirements: z.array(z.object({ category: z.string().max(40), title: z.string().min(2).max(300), quantity: optNonNegative(1e7, "Quantity"), unit: z.string().optional() })).default([]),
 });
 
 export type ProjectInput = z.input<typeof projectSchema>;
@@ -47,6 +47,7 @@ export async function createProjectAction(input: ProjectInput) {
     if (ee <= es) throw new Error("Event end must be after event start");
     if (ss >= es) throw new Error("Setup must start before the event");
     if (se > es) throw new Error("Setup must end before the event starts");
+    if (se <= ss) throw new Error("Setup end must be after setup start");
     let venueId = d.venueId || null;
     if (venueId) await db.eventVenue.findFirstOrThrow({ where: { id: venueId, companyId: u.companyId } });
     if (!venueId && d.newVenueName) {
@@ -88,6 +89,10 @@ export async function assignDepartmentsAction(projectId: string, departments: { 
   return run(async () => {
     const { u, p } = await scopedProject(projectId);
     assertCan(u, "project.assign");
+    departments = z.array(z.object({ key: z.string().max(40), leadId: z.string().max(40).optional(), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")) })).max(20).parse(departments);
+    // leads must be users of THIS company (no cross-tenant references)
+    const leadIds = departments.map((d) => d.leadId).filter(Boolean) as string[];
+    if (leadIds.length && (await db.user.count({ where: { id: { in: leadIds }, companyId: u.companyId, active: true } })) !== new Set(leadIds).size) throw new Error("Unknown department lead");
     const depts = await db.department.findMany({ where: { companyId: u.companyId, key: { in: departments.map((d) => d.key) } } });
     for (const dep of depts) {
       const x = departments.find((d) => d.key === dep.key)!;
@@ -123,9 +128,13 @@ export async function generatePlanAction(projectId: string) {
   }, "Plan generated");
 }
 
+/** Read-only roles (Viewer) cannot write; any contributing permission can comment. */
+const COMMENT_PERMISSIONS = ["project.edit", "submission.create", "plan.review", "budget.approve", "procurement.manage", "execution.update"] as const;
+
 export async function addCommentAction(projectId: string, body: string) {
   return run(async () => {
     const { u } = await scopedProject(projectId);
+    if (!COMMENT_PERMISSIONS.some((p) => u.permissions.has(p))) throw new Error("Your role is read-only — you cannot comment");
     const text = z.string().trim().min(1).max(2000).parse(body);
     await db.comment.create({ data: { projectId, userId: u.id, body: text } });
     revalidatePath(`/projects/${projectId}/activity`);

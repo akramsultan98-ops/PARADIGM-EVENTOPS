@@ -6,7 +6,8 @@ import { db } from "@/lib/db";
 import { assertCan, requireUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
-import { validateUpload } from "@/server/storage";
+import { maxUploadBytes, validateUpload } from "@/server/storage";
+import { assertDeclaredSize, FILE_LIMITS, inspectZip, withTimeout } from "@/server/services/file-safety";
 import { run } from "./_util";
 
 const IMPORT_TARGETS = {
@@ -18,8 +19,14 @@ const IMPORT_TARGETS = {
 type Target = keyof typeof IMPORT_TARGETS;
 
 async function parseFile(file: File): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
+  assertDeclaredSize(file, maxUploadBytes());
   const buf = Buffer.from(await file.arrayBuffer());
   const mime = validateUpload(file.name, file.type, buf);
+  if (mime.includes("openxmlformats")) inspectZip(buf);
+  return withTimeout(parseBuffer(buf, mime), FILE_LIMITS.parseTimeoutMs, "Import parsing");
+}
+
+async function parseBuffer(buf: Buffer, mime: string): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
   if (mime === "text/csv" || mime === "text/plain") {
     const r = Papa.parse<Record<string, string>>(buf.toString("utf8"), { header: true, skipEmptyLines: true });
     return { headers: r.meta.fields ?? [], rows: r.data.slice(0, 5000) };

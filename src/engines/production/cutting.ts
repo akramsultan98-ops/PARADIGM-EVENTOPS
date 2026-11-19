@@ -49,6 +49,15 @@ export interface CuttingResult {
 }
 
 const EPS = 1e-9;
+/** Upper bound on individual pieces expanded by the optimiser (P2-E). Mirrors LIMITS.maxCuttingPieces. */
+export const MAX_CUTTING_PIECES = 20000;
+
+function emptyResult(board: BoardSpec, panels: PanelInput[], unplaced: CuttingResult["unplaced"]): CuttingResult {
+  return {
+    boardsUsed: 0, layouts: [], unplaced, panelAreaM2: 0, boardAreaM2: 0, utilizationPct: 0, reusableOffcuts: [],
+    trace: trace({ engine: "production.cutting", title: `Board cutting plan — ${board.materialCode}`, formula: "Not calculated — input exceeds safe workload or is invalid", inputs: { board, panels: panels.length }, outputs: { boardsUsed: 0, unplaced: unplaced.length }, assumptions: unplaced.map((u) => u.reason), units: "boards (sheets)", state: "NEEDS_INFORMATION" }),
+  };
+}
 
 export function optimizeCutting(board: BoardSpec, panels: PanelInput[], opts: { minOffcutM?: number } = {}): CuttingResult {
   const trim = board.edgeTrimMm / 1000;
@@ -57,12 +66,23 @@ export function optimizeCutting(board: BoardSpec, panels: PanelInput[], opts: { 
   const usableW = board.stockWidthM - 2 * trim;
   if (usableL <= 0 || usableW <= 0) throw new Error("Edge trim leaves no usable board area");
 
-  // expand quantities into individual pieces
-  const pieces: PanelInput[] = [];
-  for (const p of panels) {
-    if (p.length <= 0 || p.width <= 0 || p.quantity <= 0) continue;
-    for (let i = 0; i < p.quantity; i++) pieces.push({ ...p, quantity: 1, label: p.quantity > 1 ? `${p.label} #${i + 1}` : p.label });
+  const layouts: BoardLayout[] = [];
+  const unplaced: CuttingResult["unplaced"] = [];
+
+  // invalid pieces are reported, never silently dropped
+  const valid = panels.filter((p) => {
+    const ok = Number.isFinite(p.length) && Number.isFinite(p.width) && Number.isInteger(p.quantity) && p.length > 0 && p.width > 0 && p.quantity > 0;
+    if (!ok) unplaced.push({ label: p.label, length: p.length, width: p.width, reason: `Invalid size or quantity (${p.length} × ${p.width} m × ${p.quantity}) — correct the component on the drawing` });
+    return ok;
+  });
+  // bound the work before expanding quantities into individual pieces (protects the server from huge inputs)
+  const totalPieces = valid.reduce((s, p) => s + p.quantity, 0);
+  if (totalPieces > MAX_CUTTING_PIECES) {
+    unplaced.push({ label: `${totalPieces} pieces`, length: 0, width: 0, reason: `Too many pieces to optimise (${totalPieces} > ${MAX_CUTTING_PIECES}) — split the item or verify the quantities` });
+    return emptyResult(board, panels, unplaced);
   }
+  const pieces: PanelInput[] = [];
+  for (const p of valid) for (let i = 0; i < p.quantity; i++) pieces.push({ ...p, quantity: 1, label: p.quantity > 1 ? `${p.label} #${i + 1}` : p.label });
   pieces.sort((a, b) => {
     const la = Math.max(a.length, a.width), lb = Math.max(b.length, b.width);
     if (Math.abs(lb - la) > EPS) return lb - la;
@@ -70,9 +90,6 @@ export function optimizeCutting(board: BoardSpec, panels: PanelInput[], opts: { 
     if (Math.abs(ab - aa) > EPS) return ab - aa;
     return a.label.localeCompare(b.label);
   });
-
-  const layouts: BoardLayout[] = [];
-  const unplaced: CuttingResult["unplaced"] = [];
 
   const fits = (r: Rect, w: number, h: number) => w <= r.w + EPS && h <= r.h + EPS;
 

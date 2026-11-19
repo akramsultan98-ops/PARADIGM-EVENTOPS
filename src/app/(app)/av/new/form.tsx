@@ -18,7 +18,7 @@ export function AvForm({ projects, defaultProject, equipment }: { projects: { id
   const router = useRouter();
   const upd = (i: number, k: keyof Line, v: string) => setLines((s) => s.map((x, j) => (j === i ? { ...x, [k]: v, ...(k === "equipmentId" && !x.description ? { description: equipment.find((e) => e.id === v)?.model ?? "" } : {}) } : x)));
   const save = (submit: boolean) => start(async () => {
-    const r = await saveAvRequirementsAction({ projectId, submit, lines: lines.filter((l) => l.description).map((l) => ({ equipmentId: l.equipmentId || null, category: equipment.find((e) => e.id === l.equipmentId)?.category ?? "OTHER", description: l.description, quantity: Number(l.quantity), backupQuantity: Number(l.backupQuantity), specs: l.specs || null })) });
+    const r = await saveAvRequirementsAction({ projectId, submit, lines: lines.filter((l) => l.description).map((l) => ({ equipmentId: l.equipmentId || null, category: (equipment.find((e) => e.id === l.equipmentId)?.category ?? "OTHER") as never, description: l.description, quantity: Number(l.quantity), backupQuantity: Number(l.backupQuantity), specs: l.specs || null })) });
     if (r.ok) { toast(submit ? "Submitted for AV Manager approval" : "Saved as draft"); router.push(`/projects/${projectId}/av`); } else toast(r.error, { tone: "error" });
   });
   return (

@@ -22,10 +22,25 @@ export async function loadStandards(companyId: string): Promise<{ standards: Sta
   return { standards: s, warehouseCity: typeof city === "string" ? city : "Cairo", rows: [...latest.values()].map((r) => ({ key: r.key, status: r.status, version: r.version })) };
 }
 
+/** Per project per day the LARGEST single crew of a category (a lower bound of what is committed — never overstated). */
+function committedByCategory(rows: { laborCategoryId: string; workDate: Date; crewSize: number; project: { code: string } }[], categoryId: string) {
+  const peak = new Map<string, { projectCode: string; day: string; crew: number }>();
+  for (const r of rows) {
+    if (r.laborCategoryId !== categoryId) continue;
+    const day = r.workDate.toISOString().slice(0, 10);
+    const k = `${r.project.code}|${day}`;
+    const cur = peak.get(k);
+    if (!cur || r.crewSize > cur.crew) peak.set(k, { projectCode: r.project.code, day, crew: r.crewSize });
+  }
+  return [...peak.values()];
+}
+
 export async function buildSnapshot(companyId: string, projectId: string, asOf = new Date()): Promise<ProjectSnapshot> {
   const p = await db.project.findFirstOrThrow({ where: { id: projectId, companyId, deletedAt: null }, include: { venue: true } });
   const { standards, warehouseCity } = await loadStandards(companyId);
-  const [materials, items, labor, equipment, reqs, vehicles, drivers, cargo, routes, acc, hotels, branding, costs, rates, otherEq, otherVeh] = await Promise.all([
+  const horizonFrom = new Date(Math.min(asOf.getTime(), p.setupStart.getTime()) - 86400000);
+  const horizonTo = new Date((p.dismantleEnd ?? p.eventEnd).getTime() + 2 * 86400000);
+  const [materials, items, labor, equipment, reqs, vehicles, drivers, cargo, routes, acc, hotels, branding, costs, rates, otherEq, otherVeh, otherLabor] = await Promise.all([
     db.material.findMany({ where: { companyId }, include: { supplier: true } }),
     db.productionItem.findMany({ where: { projectId }, include: { specs: true }, orderBy: { code: "asc" } }),
     db.laborCategory.findMany({ where: { companyId }, include: { rates: true } }),
@@ -42,6 +57,8 @@ export async function buildSnapshot(companyId: string, projectId: string, asOf =
     db.exchangeRate.findMany({ where: { companyId } }),
     db.resourceAssignment.findMany({ where: { resourceType: "EQUIPMENT", projectId: { not: projectId }, project: { companyId, deletedAt: null, status: { notIn: ["CANCELLED", "COMPLETED"] } } }, include: { project: { select: { code: true } } } }),
     db.resourceAssignment.findMany({ where: { resourceType: "VEHICLE", projectId: { not: projectId }, project: { companyId, deletedAt: null, status: { notIn: ["CANCELLED", "COMPLETED"] } } }, include: { project: { select: { code: true } } } }),
+    // crews planned on other active projects inside this project's horizon (P2-F: no double-counted headcount)
+    db.laborAssignment.findMany({ where: { projectId: { not: projectId }, workDate: { gte: horizonFrom, lte: horizonTo }, laborCategory: { companyId }, project: { companyId, deletedAt: null, status: { notIn: ["CANCELLED", "COMPLETED"] } } }, select: { laborCategoryId: true, workDate: true, crewSize: true, project: { select: { code: true } } } }),
   ]);
   return {
     asOf,
@@ -65,7 +82,7 @@ export async function buildSnapshot(companyId: string, projectId: string, asOf =
     })),
     laborCategories: labor.map((l) => ({
       id: l.id, key: l.key, name: l.name, dailyHours: l.dailyHours, breakHours: l.breakHours, maxOvertimeHours: l.maxOvertimeHours, dailyRate: num(l.dailyRate), overtimeHourlyRate: num(l.overtimeHourlyRate),
-      currency: l.currency, headcount: l.headcountAvailable, status: l.status, rates: l.rates.filter((r) => r.status !== "RETIRED").map((r) => ({ activity: r.activity, unitOfWork: r.unitOfWork, hoursPerUnit: r.hoursPerUnit, status: r.status })),
+      currency: l.currency, headcount: l.headcountAvailable, status: l.status, committedElsewhere: committedByCategory(otherLabor, l.id), rates: l.rates.filter((r) => r.status !== "RETIRED").map((r) => ({ activity: r.activity, unitOfWork: r.unitOfWork, hoursPerUnit: r.hoursPerUnit, status: r.status })),
     })),
     equipment: equipment.map((e) => ({
       id: e.id, code: e.code, category: e.category, model: e.model, weightKg: e.weightKg, caseVolumeM3: e.caseVolumeM3, powerW: e.powerW, setupMinutes: e.setupMinutes, techniciansRequired: e.techniciansRequired,

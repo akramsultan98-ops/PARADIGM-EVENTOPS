@@ -18,12 +18,18 @@ export interface TimberResult {
   trace: CalcTrace;
 }
 
+/** Upper bound on expanded timber pieces (P2-E). */
+export const MAX_TIMBER_PIECES = 20000;
+
 export function optimizeTimber(stock: StockSpec, members: MemberInput[]): TimberResult {
   const kerf = stock.kerfMm / 1000;
   const pieces: { label: string; lengthM: number }[] = [];
   const oversize: MemberInput[] = [];
+  // invalid members and workloads beyond the safe bound are reported (as not cuttable), never expanded (P2-E)
+  const total = members.reduce((s, m) => s + (Number.isInteger(m.quantity) && m.quantity > 0 ? m.quantity : 0), 0);
   for (const m of members) {
-    if (m.lengthM > stock.stockLengthM + 1e-9) { oversize.push(m); continue; }
+    const invalid = !(Number.isFinite(m.lengthM) && m.lengthM > 0 && Number.isInteger(m.quantity) && m.quantity > 0);
+    if (invalid || total > MAX_TIMBER_PIECES || m.lengthM > stock.stockLengthM + 1e-9) { oversize.push(m); continue; }
     for (let i = 0; i < m.quantity; i++) pieces.push({ label: m.label, lengthM: m.lengthM });
   }
   pieces.sort((a, b) => b.lengthM - a.lengthM || a.label.localeCompare(b.label));

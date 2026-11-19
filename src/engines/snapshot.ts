@@ -140,6 +140,8 @@ export interface LaborCategorySnap {
   headcount: number;
   status: string;
   rates: { activity: string; unitOfWork: string; hoursPerUnit: number; status: string }[];
+  /** Crew already planned on OTHER active projects, per calendar day (P2-F). Absent = none known. */
+  committedElsewhere?: { projectCode: string; day: string; crew: number }[];
 }
 
 export interface EquipmentSnap {

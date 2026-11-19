@@ -18,6 +18,7 @@ async function scopedTask(taskId: string) {
 
 export async function updateTaskProgressAction(taskId: string, status: "IN_PROGRESS" | "COMPLETED" | "BLOCKED" | "NOT_STARTED", percent?: number) {
   return run(async () => {
+    ({ status, percent } = z.object({ status: z.enum(["IN_PROGRESS", "COMPLETED", "BLOCKED", "NOT_STARTED"]), percent: z.number().finite().min(0).max(100).optional() }).parse({ status, percent }));
     const { u, t } = await scopedTask(taskId);
     const now = new Date();
     const pct = status === "COMPLETED" ? 100 : Math.max(0, Math.min(99, percent ?? t.percentComplete));
@@ -81,6 +82,7 @@ export async function recordActualAction(input: z.input<typeof actualSchema>) {
     assertCan(u, "execution.update");
     const d = actualSchema.parse(input);
     await db.project.findFirstOrThrow({ where: { ...projectScope(u), id: d.projectId } });
+    if (d.taskId) await db.task.findFirstOrThrow({ where: { id: d.taskId, projectId: d.projectId } }).catch(() => { throw new Error("Task does not belong to this project"); });
     if (d.materialId) await db.material.findFirstOrThrow({ where: { id: d.materialId, companyId: u.companyId } });
     await db.actualConsumption.create({ data: { projectId: d.projectId, resourceType: d.resourceType, category: d.category, description: d.description, plannedQuantity: d.plannedQuantity ?? null, actualQuantity: d.actualQuantity, unit: d.unit, materialId: d.materialId || null, taskId: d.taskId || null, note: d.note, recordedById: u.id } });
     if (d.plannedQuantity && d.actualQuantity > d.plannedQuantity * 1.1) await notify({ roles: ["PROJECT_MANAGER"] }, { companyId: u.companyId, projectId: d.projectId, type: "RISK", title: `Unexpected consumption: ${d.description} ${d.actualQuantity}/${d.plannedQuantity} ${d.unit}`, link: "/execution/actual-vs-planned" });

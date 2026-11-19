@@ -121,7 +121,11 @@ export async function generatePlan(ctx: Ctx, projectId: string, opts: { asOf?: D
       await tx.vehicleAssignment.create({ data: { projectId, vehicleId: trip.vehicleId, tripLabel: `Return ${snapshot.venue?.city ?? p.location} → ${snapshot.project.originCity}`, direction: "RETURN", departureAt: dt(ret?.start), arrivalAt: dt(ret?.finish), loadedWeightKg: trip.weightKg, loadedVolumeM3: trip.volumeM3 } });
       await tx.resourceAssignment.create({ data: { projectId, resourceType: "VEHICLE", resourceId: trip.vehicleId, startAt: dt(travel?.start) ?? p.setupStart, endAt: dt(ret?.finish) ?? resEnd } });
     }
-    if (plan.logistics.backupVehicle) await tx.vehicleAssignment.create({ data: { projectId, vehicleId: plan.logistics.backupVehicle.id, tripLabel: "Standby backup vehicle", isBackup: true, departureAt: dt(travel?.start) } });
+    if (plan.logistics.backupVehicle) {
+      await tx.vehicleAssignment.create({ data: { projectId, vehicleId: plan.logistics.backupVehicle.id, tripLabel: "Standby backup vehicle", isBackup: true, departureAt: dt(travel?.start) } });
+      // the standby is RESERVED like a trip vehicle, so overlapping projects cannot plan it as available (Codex finding)
+      await tx.resourceAssignment.create({ data: { projectId, resourceType: "VEHICLE", resourceId: plan.logistics.backupVehicle.id, startAt: dt(travel?.start) ?? p.setupStart, endAt: dt(ret?.finish) ?? resEnd } });
+    }
 
     // procurement requests — create/update DRAFT lines, never touch committed ones
     const vendors = await tx.vendor.findMany({ where: { companyId: ctx.companyId } });

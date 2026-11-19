@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   serverExternalPackages: ["pdfkit", "exceljs", "@prisma/client", "bcryptjs", "unpdf", "mammoth"],
-  experimental: { serverActions: { bodySizeLimit: "25mb" } },
+  experimental: { serverActions: { bodySizeLimit: "21mb" } }, // just above the 20 MB upload limit (P2-G)
   async headers() {
     return [
       {
