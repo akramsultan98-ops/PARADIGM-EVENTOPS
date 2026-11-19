@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { generatePlan, approvePlan } from "@/server/services/planning";
-import { applyApprovedChange } from "@/server/services/changes";
+import { applyApprovedChange, loadChangeTarget } from "@/server/services/changes";
 import { buildSnapshot } from "@/server/services/snapshot";
 import { buildWorkbook } from "@/server/services/workbook";
 import { projectScope } from "@/lib/scope";
@@ -96,6 +96,26 @@ describe("change requests never overwrite an approved plan", () => {
     expect(after.drawingStatus).toBe("PROVIDED"); // revised drawing required
     expect((await db.scheduleVersion.findUniqueOrThrow({ where: { id: approvedBefore.id } })).status).toBe("APPROVED");
     expect((await db.scheduleVersion.findUniqueOrThrow({ where: { id: r.versionId } })).status).toBe("UNDER_REVIEW");
+  });
+
+  it("refuses to apply a change whose target belongs to another project or company", async () => {
+    // item of the Cairo project, change approved on the Aswan project
+    const foreign = await db.productionItem.findFirstOrThrow({ where: { projectId: caiId } });
+    const ch = await db.projectChange.create({ data: { projectId: aswanId, title: "cross-project", entityType: "ProductionItem", entityId: foreign.id, changes: [{ field: "widthM", from: foreign.widthM, to: 99 }], status: "APPROVED" } });
+    await expect(applyApprovedChange(ch.id, companyId)).rejects.toThrow(/does not belong/);
+    expect((await db.productionItem.findUniqueOrThrow({ where: { id: foreign.id } })).widthM).toBe(foreign.widthM);
+    // a Project target other than the request's own project
+    const ch2 = await db.projectChange.create({ data: { projectId: aswanId, title: "other project", entityType: "Project", entityId: caiId, changes: [{ field: "participants", from: 0, to: 1 }], status: "APPROVED" } });
+    await expect(applyApprovedChange(ch2.id, companyId)).rejects.toThrow(/does not belong/);
+    // a vehicle of another company
+    const other = await db.company.create({ data: { name: "Other fleet", slug: `fleet-${Date.now()}` } });
+    try {
+      const v = await db.vehicle.create({ data: { companyId: other.id, code: "OTH-1", type: "VAN", payloadKg: 1000, volumeM3: 10 } });
+      expect(await loadChangeTarget("Vehicle", v.id, aswanId, companyId).catch((e: Error) => e.message)).toMatch(/does not belong/);
+    } finally {
+      await db.vehicle.deleteMany({ where: { companyId: other.id } });
+      await db.company.delete({ where: { id: other.id } });
+    }
   });
 });
 

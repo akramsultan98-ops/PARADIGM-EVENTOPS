@@ -9,6 +9,7 @@ import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 import { fromLocalInput } from "@/lib/format";
 import { buildSnapshot } from "@/server/services/snapshot";
+import { loadChangeTarget } from "@/server/services/changes";
 import { runPlanningPipeline, type PlanResult } from "@/engines/pipeline";
 import { applyScenario, parseWhatIf, type ScenarioAssumptions } from "@/engines/whatif";
 import { compareImpact } from "@/engines/impact";
@@ -109,7 +110,7 @@ export async function proposeChangeAction(input: z.input<typeof changeSchema>) {
     for (const ch of c.changes) if (!ALLOWED[c.entityType].includes(ch.field)) throw new Error(`Field ${ch.field} cannot be changed through a change request`);
     const p = await db.project.findFirstOrThrow({ where: { ...projectScope(u), id: c.projectId } });
     const snap = await buildSnapshot(u.companyId, p.id, new Date());
-    const current = await currentValues(c);
+    const current = await loadChangeTarget(c.entityType, c.entityId, p.id, u.companyId); // target must belong to this project / company
     const base = runPlanningPipeline(snap);
     const next = runPlanningPipeline(applyToSnapshot(snap, c));
     const impact = compareImpact(base, next);
@@ -122,10 +123,4 @@ export async function proposeChangeAction(input: z.input<typeof changeSchema>) {
   }, "Change request created with impact analysis — awaiting approval");
 }
 
-async function currentValues(c: z.infer<typeof changeSchema>): Promise<Record<string, unknown>> {
-  if (c.entityType === "ProductionItem") return (await db.productionItem.findUniqueOrThrow({ where: { id: c.entityId } })) as unknown as Record<string, unknown>;
-  if (c.entityType === "Project") return (await db.project.findUniqueOrThrow({ where: { id: c.entityId } })) as unknown as Record<string, unknown>;
-  if (c.entityType === "Vehicle") return (await db.vehicle.findUniqueOrThrow({ where: { id: c.entityId } })) as unknown as Record<string, unknown>;
-  return (await db.equipmentRequirement.findUniqueOrThrow({ where: { id: c.entityId } })) as unknown as Record<string, unknown>;
-}
 
