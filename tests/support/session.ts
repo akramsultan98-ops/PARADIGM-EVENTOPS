@@ -30,6 +30,7 @@ export const demo = {
   production: "production@demo.eventops.local",
   av: "av@demo.eventops.local",
   logistics: "logistics@demo.eventops.local",
+  accommodation: "accommodation@demo.eventops.local",
   procurement: "procurement@demo.eventops.local",
   account: "account@demo.eventops.local",
 } as const;

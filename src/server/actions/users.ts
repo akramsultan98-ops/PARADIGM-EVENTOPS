@@ -5,6 +5,9 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { assertCan, requireUser } from "@/lib/auth/session";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, SESSION_TTL_SECONDS, signSession } from "@/lib/auth/token";
+import { rateLimit } from "@/lib/rate-limit";
 import { audit } from "@/lib/audit";
 import { run } from "./_util";
 
@@ -46,9 +49,13 @@ export async function changePasswordAction(current: string, next: string) {
   return run(async () => {
     const u = await requireUser();
     const pw = z.string().min(10, "Use at least 10 characters").max(200).regex(/[A-Za-z]/).regex(/[0-9]/, "Include at least one number").parse(next);
+    if (!rateLimit(`pwchange:${u.id}`, 5, 15 * 60_000)) throw new Error("Too many attempts — try again in a few minutes");
     const me = await db.user.findUniqueOrThrow({ where: { id: u.id } });
     if (!(await verifyPassword(current, me.passwordHash))) throw new Error("Current password is incorrect");
-    await db.user.update({ where: { id: u.id }, data: { passwordHash: await hashPassword(pw) } });
+    // P3: a password change revokes every other session (session version bump); this session gets a fresh cookie
+    const updated = await db.user.update({ where: { id: u.id }, data: { passwordHash: await hashPassword(pw), sessionVersion: { increment: 1 } } });
+    const token = await signSession({ uid: updated.id, cid: updated.companyId, sv: updated.sessionVersion });
+    (await cookies()).set(SESSION_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" && !process.env.APP_URL?.startsWith("http://"), path: "/", maxAge: SESSION_TTL_SECONDS });
     await audit({ companyId: u.companyId, userId: u.id, action: "PASSWORD_CHANGED", entityType: "User", entityId: u.id });
-  }, "Password changed");
+  }, "Password changed — all other sessions were signed out");
 }

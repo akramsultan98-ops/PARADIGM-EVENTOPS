@@ -1,6 +1,6 @@
 # Build status — PARADIGM EVENTOPS
 
-_Last updated: 2026-11-19 (session 2 — pre-PR review & hardening). Read this first when resuming work._
+_Last updated: 2026-11-19 (session 3 — security remediation sprint on PR #2). Read this first when resuming work._
 
 ## Summary
 The MVP workflow (spec §38) is implemented and verified end-to-end through the real UI by an automated Playwright test. The application is a working Next.js 15 + PostgreSQL/Prisma platform with deterministic planning engines, role-based workspaces, approvals, execution tracking and exports. Demo data is connected and clearly labelled.
@@ -31,6 +31,44 @@ The MVP workflow (spec §38) is implemented and verified end-to-end through the 
 | Security: server-side authz, tenant scoping, rate limits, headers, upload validation, audit log, 403 page | ✅ |
 | OR-Tools CP-SAT service + adapter + `/api/projects/[id]/optimize` (advisory) | ✅ solver tested; not wired into the UI |
 | Docker (standalone image, compose with Postgres + optional optimizer), health check, backup script | ✅ written; **docker build not run here** (no Docker daemon in this environment) |
+
+## Session 3 — security remediation sprint (PR #2)
+Fixes for the independent audit (P1-1…P3) and the Codex review on `c053125`. Every finding has a regression test; "mutation" = the fix was reverted/weakened and the test was confirmed to fail.
+
+| # | Finding | Fix | Regression test |
+|---|---|---|---|
+| P1-1 (+Codex P1) | Plan generation overwrote approval with calculation state → approved items editable, approved AV deletable | `approvalStatus` (SourceApprovalStatus) separate from `calculationState` (@map("state")); migration backfills approvals from submission decisions; planning writes calculation state only | `approval-state.test.ts` submit→approve→generate×2→edit/delete rejected (production + AV); approved change request keeps approval. Mutation: 2 fail |
+| P1-2 | `budget.read` bypass (budget tab, workbook, assistant, overview, workspaces…) | `src/lib/financial.ts` redaction at the data source (plan loaders, project context, read models, workbook, PDF, assistant, procurement, library pages); BudgetTab refuses server-side | `financial-confidentiality.test.ts` role matrix ×6 roles over routes/loaders/BudgetTab/assistant (43 checks); `financial-redaction.test.ts`; E2E `financial.spec.ts`. Mutation: 20 fail |
+| P1-3 | Non-atomic approvals, concurrent double decisions, invalid values failing after approval, self-approval | `change-validation.ts`; `decideApprovalAction` = one transaction with conditional PENDING claim; `approvePlan` transactional; self-approval blocked | `approval-atomicity.test.ts` (fractional/negative values, stale change rollback, parallel approvers on change and submission, deterministic row-lock race, self-approval PM/Super Admin, re-decision); `change-validation.test.ts`. Mutation (claim without PENDING): fails |
+| P2-A | Review of DRAFT/NEEDS_INFORMATION, self-review, ESTIMATED promoted, incomplete form submission | `services/review.ts` status gate, self-review block, missing-field block, only UNDER_REVIEW promoted; submit check for all methods | `p2-guards.test.ts` P2-A |
+| P2-B | Change-request typing/ownership | (P1-3) + ownership check on propose and apply | `approval-atomicity`, `workflow.test.ts` |
+| P2-C | Vendor swap after approval, quote reselection, unvalidated vendor, lost delivery updates | Company-scoped vendor, locked after submission; order uses approved vendor; conditional transitions; atomic increments | `p2-guards.test.ts` P2-C (incl. concurrent deliveries) |
+| P2-D | Reschedule of approved schedule without approval, other departments' tasks, ahead of predecessors | Plan-approval authority required on approved schedules (recorded as approver); department scope; predecessor constraints; event milestones fixed; transactional | `p2-guards.test.ts` P2-D |
+| P2-E | Negative/zero sizes, unbounded quantities, unvalidated enums/status | `lib/validation.ts`; piece/unit limits; engines report invalid/oversized input (cutting, timber, BOQ, fleet) | `engine-guards.test.ts`, `p2-guards.test.ts` P2-E |
+| P2-F (+Codex P2×2) | Labour double-booked across projects; standby vehicle not reserved; backup vehicle too short | Crew availability nets out other projects' planned crews; standby reserved as `ResourceAssignment`; backup must fit longest piece | `engine-guards.test.ts`, `p2-guards.test.ts` P2-F. Mutation: 2 fail |
+| P2-G | Uploads read fully before size check; zip bombs; unbounded PDF; task photo ownership | Declared-size check, ZIP central-directory inspection, PDF page cap, timeouts, 21 MB body limit, task ownership | `engine-guards.test.ts` (synthetic bombs), `p2-guards.test.ts` P2-G |
+| P2-H (+Codex P2) | RFQ without permission; foreign leads/room types/tasks; viewer comments | RFQ requires `procurement.manage`; ownership checks; read-only roles cannot comment | `financial-confidentiality.test.ts` (RFQ), `p2-guards.test.ts` P2-H |
+| P3 | CSP/HSTS, backup credentials/encryption, password-change sessions, proxy IP, duplicate approvals, code collisions, AI evidence, rate units | Headers; encrypted backup via PGPASSWORD; session-version bump; `TRUST_PROXY_HOPS`; partial unique index (one PENDING approval per entity); retry on code collision; evidence must be quoted from input; unit preserved on standards approval | `p3-hardening` (unit + integration incl. real pg_dump + decrypt, argv inspection), E2E header test |
+
+### Tests executed (session 3, final)
+| Suite | Result |
+|---|---|
+| `npm run lint` / `npm run typecheck` | clean / clean |
+| `npm run test:unit` | **111 / 111** |
+| `npm run test:integration` (PostgreSQL) | **91 / 91** |
+| `npm run test:e2e` (desktop + mobile, dev server with CSP) | **13 / 13** |
+| `npm run build` | successful (Google Fonts fetch flaked once, retry succeeded) |
+| Production smoke under CSP (`next start`) | hydration + server action round-trip OK, 0 console/CSP errors |
+| `pytest services/optimizer` | 3 / 3 |
+
+### Remaining limitations / deferred (risk-based)
+- CSP keeps `'unsafe-inline'` for scripts (Next.js bootstrap); nonce-based CSP via middleware is the next step.
+- Plan approval by the PM who generated the plan is allowed (generation is a calculation, not a proposal); all other approval types enforce four-eyes.
+- Cross-project labour uses a lower bound per project per day (largest planned crew) — never overstates commitments; exact per-hour overlap is not modelled.
+- Manual reschedules on a non-executing project are replaced when the plan is regenerated (by design: the plan is recalculated); approved schedules require PM authority to change.
+- Vehicle availability change requests affect the vehicle company-wide (fleet is a company resource).
+- Rate limiting is in-memory per process; `npm audit`: 7 advisories needing major upgrades (Prisma 7, Next 16); Docker image build not run (no daemon); live Claude path not exercised (evidence verification is unit-tested); Egypt DST not modelled.
+- Integration test DB is reset with `SEED_FORCE_RESET=true` (test database only).
 
 ## Session 2 — pre-merge review & hardening
 - **Secrets:** no API keys, tokens, private keys or real credentials are tracked (`.env` is git-ignored; only `.env.example` placeholders). Production client bundle scanned: no secrets, no demo password.

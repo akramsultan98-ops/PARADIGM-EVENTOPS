@@ -8,6 +8,7 @@ import { SESSION_COOKIE, SESSION_TTL_SECONDS, signSession } from "@/lib/auth/tok
 import { getCurrentUser } from "@/lib/auth/session";
 import { LOCALE_COOKIE } from "@/i18n/server";
 import { rateLimit } from "@/lib/rate-limit";
+import { clientIp } from "@/lib/client-ip";
 import { demoLoginEnabled } from "@/lib/auth/demo";
 import { safeNext } from "@/lib/auth/redirect";
 
@@ -19,7 +20,7 @@ const DUMMY_HASH = "$2b$12$Ncy7oeHEd3NyIyHq40tkYu3NqYxDggxtrzkrcA/SY8wRaiXD9Do1m
 export async function loginAction(_: unknown, form: FormData): Promise<{ error?: string }> {
   const parsed = schema.safeParse({ email: String(form.get("email") ?? "").trim().toLowerCase(), password: form.get("password"), next: form.get("next") ?? undefined });
   if (!parsed.success) return { error: "invalid" };
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  const ip = clientIp(await headers()); // X-Forwarded-For only when a trusted proxy is configured (TRUST_PROXY_HOPS)
   // Per IP+account and per account (X-Forwarded-For can be spoofed when not behind a trusted proxy).
   if (!rateLimit(`login:${ip}:${parsed.data.email}`, 8, 10 * 60_000) || !rateLimit(`login-acct:${parsed.data.email}`, 30, 10 * 60_000)) return { error: "Too many attempts — try again in a few minutes" };
   const user = await db.user.findUnique({ where: { email: parsed.data.email } });

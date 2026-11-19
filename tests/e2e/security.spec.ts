@@ -24,3 +24,14 @@ test("tampered session cookie is rejected", async ({ page, context }) => {
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login/);
 });
+
+test("security headers: CSP, HSTS, framing and sniffing protections (P3)", async ({ request }) => {
+  const r = await request.get("/login");
+  const h = r.headers();
+  expect(h["content-security-policy"]).toMatch(/default-src 'self'/);
+  expect(h["content-security-policy"]).toMatch(/frame-ancestors 'none'/);
+  expect(h["content-security-policy"]).toMatch(/object-src 'none'/);
+  expect(h["strict-transport-security"]).toMatch(/max-age=\d+/);
+  expect(h["x-frame-options"]).toBe("DENY");
+  expect(h["x-content-type-options"]).toBe("nosniff");
+});

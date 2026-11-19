@@ -23,7 +23,7 @@ Every query is scoped by `companyId`; department members/viewers are further res
 - zod validation for all action inputs; Prisma parameterised queries; internal DB errors are not echoed to users.
 - Uploads: extension allow-list, declared type check, **magic-byte validation**, size limit (`MAX_UPLOAD_MB`, default 20), SHA-256 hash, random storage keys, path-traversal guard, private storage; downloads only through an authorised route with `nosniff`, restrictive CSP and inline only for PDF/images.
 - CSV exports neutralise formula injection.
-- Security headers: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`; `poweredByHeader` off.
+- Security headers: `Content-Security-Policy` (same-origin only; `frame-ancestors 'none'`, `object-src 'none'`; scripts keep `'unsafe-inline'` for the Next.js bootstrap — a nonce-based policy is the next step), `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`; `poweredByHeader` off.
 - Rate limits: login, uploads (30/10 min), AI assistant (40/10 min). In-memory per process — use a shared store when scaling horizontally.
 
 ## Audit
@@ -31,3 +31,15 @@ Every query is scoped by `companyId`; department members/viewers are further res
 
 ## Secrets
 Only via environment variables (`.env` is git-ignored; `.env.example` documents keys). No credentials in the repository.
+
+## Remediation sprint (PR #2) — controls added
+- **Approval state ≠ calculation state.** `approvalStatus` (DRAFT/UNDER_REVIEW/APPROVED/REJECTED) is written only by submit, technical review and approved change requests; plan generation writes `calculationState` only. Approved production items and AV requirements stay immutable across any number of plan generations.
+- **Financial confidentiality.** Costs, prices, rates and budgets require `budget.read`, enforced where data is loaded (`src/lib/financial.ts`: plan loaders, project context, workbook, PDF report, assistant, read models). The budget tab refuses on the server.
+- **Atomic, single-winner approvals.** Each decision is one transaction that claims the approval with `UPDATE … WHERE status = 'PENDING'`; all effects (change application, transitions, review, audit) commit or roll back together. A partial unique index allows only one pending approval per entity.
+- **Segregation of duties.** Requesters cannot decide their own change, submission, procurement, budget or standards requests; submitters cannot technically review their own inputs. (Plan approval by the PM who generated it is allowed: generation is a calculation, not a proposal.)
+- **Typed change requests.** Values are validated (integers, positive dimensions, 2-decimal money, strict booleans, valid dates, project date order) at proposal and again against the current record when applied; budget changes need `budget.read`.
+- **Workflow integrity.** Only SUBMITTED inputs can be reviewed; incomplete inputs cannot be submitted; procurement vendors/quotes lock once submitted to Finance; approved schedules change only with plan-approval authority and never ahead of predecessors.
+- **Bounded processing.** Positive, bounded physical inputs; piece/unit limits before engines expand quantities; ZIP directory inspection before Office parsing (bombs refused), PDF page cap, parsing timeouts, 21 MB request limit.
+- **Ownership of references.** Leads, room types, tasks, vendors and change targets must belong to the same company/project.
+- **Sessions & rate limits.** Password change revokes all other sessions; `X-Forwarded-For` is trusted only with `TRUST_PROXY_HOPS`.
+- **Backups** are encrypted and never expose the DB password on the command line.

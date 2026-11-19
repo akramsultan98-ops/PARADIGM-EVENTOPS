@@ -55,13 +55,15 @@ export async function createProjectAction(input: ProjectInput) {
     }
     const year = String(es.getUTCFullYear()).slice(2), mon = String(es.getUTCMonth() + 1).padStart(2, "0");
     const prefix = d.location.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "X");
-    let code = `${prefix}-${year}${mon}`;
-    for (let i = 2; await db.project.findFirst({ where: { companyId: u.companyId, code } }); i++) code = `${prefix}-${year}${mon}-${i}`;
+    const base = `${prefix}-${year}${mon}`;
+    let code = base;
+    for (let i = 2; await db.project.findFirst({ where: { companyId: u.companyId, code } }); i++) code = `${base}-${i}`;
     const users = await db.user.findMany({ where: { companyId: u.companyId, id: { in: [d.projectManagerId, d.accountManagerId, ...d.departments.map((x) => x.leadId)].filter(Boolean) as string[] } }, select: { id: true } });
     const valid = new Set(users.map((x) => x.id));
     const depts = await db.department.findMany({ where: { companyId: u.companyId, key: { in: d.departments.map((x) => x.key) } } });
-    const p = await db.project.create({ data: {
-      companyId: u.companyId, code, name: d.name, client: d.client, category: d.category, participants: d.participants, description: d.description, location: d.location, venueId,
+    // P3: two creations racing for the same code — the unique (companyId, code) index decides; retry with the next suffix
+    const create = (c: string) => db.project.create({ data: {
+      companyId: u.companyId, code: c, name: d.name, client: d.client, category: d.category, participants: d.participants, description: d.description, location: d.location, venueId,
       eventStart: es, eventEnd: ee, setupStart: ss, setupEnd: se, dismantleStart: d.dismantleStart ? fromLocalInput(d.dismantleStart) : null, dismantleEnd: d.dismantleEnd ? fromLocalInput(d.dismantleEnd) : null,
       budgetAmount: d.budgetAmount, currency: d.currency.toUpperCase(),
       ownerId: u.id, projectManagerId: d.projectManagerId && valid.has(d.projectManagerId) ? d.projectManagerId : null, accountManagerId: d.accountManagerId && valid.has(d.accountManagerId) ? d.accountManagerId : u.role === "ACCOUNT_MANAGER" ? u.id : null,
@@ -70,6 +72,15 @@ export async function createProjectAction(input: ProjectInput) {
       requirements: { create: d.requirements.map((r) => ({ category: r.category, title: r.title, quantity: r.quantity, unit: r.unit || null })) },
       members: { create: [{ userId: u.id, role: "Creator" }] },
     } });
+    let p: Awaited<ReturnType<typeof create>> | null = null;
+    for (let attempt = 0; !p; attempt++) {
+      try { p = await create(code); }
+      catch (e) {
+        const dup = e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002";
+        if (!dup || attempt >= 5) throw e;
+        code = `${base}-${Math.floor(Math.random() * 900) + 100}`;
+      }
+    }
     if (d.budgetAmount) await db.projectBudget.create({ data: { projectId: p.id, currency: p.currency, totalBudget: d.budgetAmount } });
     await audit({ companyId: u.companyId, userId: u.id, projectId: p.id, action: "PROJECT_CREATED", entityType: "Project", entityId: p.id, details: { code } });
     if (depts.length) await notify({ departments: depts.map((x) => x.key) }, { companyId: u.companyId, projectId: p.id, type: "MISSING_INPUT", title: `New project ${d.name}: your department's requirements are needed`, link: `/projects/${p.id}/inputs` });

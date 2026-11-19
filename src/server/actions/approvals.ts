@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { assertCan, requireUser } from "@/lib/auth/session";
+import { projectScope } from "@/lib/scope";
 import { notify } from "@/lib/notify";
 import { approvePlan, generatePlan } from "@/server/services/planning";
 import { applyApprovedChange } from "@/server/services/changes";
@@ -136,9 +137,14 @@ export async function requestBudgetApprovalAction(projectId: string) {
   return run(async () => {
     const u = await requireUser();
     assertCan(u, "plan.review");
-    const p = await db.project.findFirstOrThrow({ where: { id: projectId, companyId: u.companyId } });
-    const b = await db.projectBudget.findFirst({ where: { projectId, status: "PENDING" } }) ?? await db.projectBudget.create({ data: { projectId, currency: p.currency, totalBudget: p.budgetAmount ?? 0 } });
-    await db.approval.create({ data: { companyId: u.companyId, projectId, entityType: "BUDGET", entityId: b.id, title: `Budget approval — ${p.name}`, requiredRole: "FINANCE", requestedById: u.id } });
+    assertCan(u, "budget.read");
+    const p = await db.project.findFirstOrThrow({ where: { ...projectScope(u), id: projectId } });
+    await db.$transaction(async (tx) => {
+      const b = await tx.projectBudget.findFirst({ where: { projectId, status: "PENDING" } }) ?? await tx.projectBudget.create({ data: { projectId, currency: p.currency, totalBudget: p.budgetAmount ?? 0 } });
+      // one pending request per budget (also enforced by the partial unique index Approval_one_pending_per_entity)
+      if (await tx.approval.findFirst({ where: { entityType: "BUDGET", entityId: b.id, status: "PENDING" } })) throw new Error("A budget approval is already pending for this project");
+      await tx.approval.create({ data: { companyId: u.companyId, projectId, entityType: "BUDGET", entityId: b.id, title: `Budget approval — ${p.name}`, requiredRole: "FINANCE", requestedById: u.id } });
+    });
     await notify({ roles: ["FINANCE"] }, { companyId: u.companyId, projectId, type: "APPROVAL", title: `Budget approval requested — ${p.name}`, link: "/approvals" });
     revalidatePath(`/projects/${projectId}/budget`);
   }, "Budget approval requested from Finance");

@@ -14,6 +14,7 @@ export async function run<T>(fn: () => Promise<T | ActionResult<T>>, okMessage?:
     if (e instanceof AuthorizationError) return { ok: false, error: e.message };
     if (e instanceof ZodError) return { ok: false, error: e.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
     if (e && typeof e === "object" && "digest" in e && String((e as { digest: string }).digest).startsWith("NEXT_REDIRECT")) throw e;
+    if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002") return { ok: false, error: "This was already done by someone else (duplicate) — reload and check" };
     const msg = e instanceof Error ? e.message : "Unexpected error";
     console.error("[action]", e);
     // Prisma internals are not exposed verbatim
