@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { assertCan, canReviewDepartment, requireUser, type AuthUser } from "@/lib/auth/session";
+import { assertCan, requireUser, type AuthUser } from "@/lib/auth/session";
+import { reviewSubmission } from "@/server/services/review";
 import { projectScope } from "@/lib/scope";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
@@ -131,7 +132,8 @@ export async function submitSubmissionAction(submissionId: string) {
     guardEdit(u, s.department.key);
     if (!["DRAFT", "NEEDS_INFORMATION", "REJECTED", "REVISED"].includes(s.status)) throw new Error(`Submission is already ${s.status.toLowerCase()}`);
     const missing = (s.missingFields as unknown[] | null) ?? [];
-    if (s.method === "AI_CONVERSATION" && missing.length) throw new Error("Complete and confirm the extracted information before submitting");
+    // every submission method (form, conversation, document) must be complete before review
+    if (missing.length) throw new Error(`Complete the ${missing.length} missing field(s) before submitting`);
     await db.departmentSubmission.update({ where: { id: s.id }, data: { status: "SUBMITTED", submittedAt: new Date() } });
     await db.productionItem.updateMany({ where: { submissionId: s.id, approvalStatus: { in: ["DRAFT", "REJECTED"] } }, data: { approvalStatus: "UNDER_REVIEW" } });
     await db.equipmentRequirement.updateMany({ where: { submissionId: s.id, approvalStatus: { in: ["DRAFT", "REJECTED"] } }, data: { approvalStatus: "UNDER_REVIEW" } });
@@ -145,25 +147,10 @@ export async function submitSubmissionAction(submissionId: string) {
 export async function reviewSubmissionAction(submissionId: string, decision: "APPROVED" | "REJECTED" | "NEEDS_INFORMATION", note: string) {
   return run(async () => {
     const u = await requireUser();
-    const s = await db.departmentSubmission.findFirstOrThrow({ where: { id: submissionId, project: { companyId: u.companyId } }, include: { department: true, project: true } });
-    if (!canReviewDepartment(u, s.department.key) && !(u.role === "PROJECT_MANAGER" && s.department.key === "ACCOUNT")) throw new Error(`Only the ${s.department.name} manager can technically approve this submission`);
-    if (decision !== "APPROVED" && note.trim().length < 3) throw new Error("Please give a reason");
-    await db.departmentSubmission.update({ where: { id: s.id }, data: { status: decision, reviewerId: u.id, reviewedAt: new Date(), reviewNote: note || null } });
-    // department status reflects the worst open submission
-    const others = await db.departmentSubmission.findMany({ where: { projectId: s.projectId, departmentId: s.departmentId, id: { not: s.id }, status: { notIn: ["APPROVED", "REJECTED"] } } });
-    await db.projectDepartment.updateMany({ where: { projectId: s.projectId, departmentId: s.departmentId }, data: { status: decision === "APPROVED" && others.length ? others[0].status : decision } });
-    if (decision === "APPROVED") {
-      await db.productionItem.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: "APPROVED" } });
-      await db.productionItem.updateMany({ where: { submissionId: s.id, drawingStatus: "PROVIDED" }, data: { drawingStatus: "APPROVED" } });
-      await db.equipmentRequirement.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: "APPROVED" } });
-    } else {
-      const to = decision === "REJECTED" ? "REJECTED" : "DRAFT";
-      await db.productionItem.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: to } });
-      await db.equipmentRequirement.updateMany({ where: { submissionId: s.id, approvalStatus: "UNDER_REVIEW" }, data: { approvalStatus: to } });
-    }
-    await db.approval.updateMany({ where: { entityType: "SUBMISSION", entityId: s.id, status: "PENDING" }, data: { status: decision === "APPROVED" ? "APPROVED" : decision === "REJECTED" ? "REJECTED" : "CHANGES_REQUESTED", approverId: u.id, decidedAt: new Date(), decisionNote: note || null } });
-    await notify({ userIds: [s.submittedById] }, { companyId: u.companyId, projectId: s.projectId, type: "APPROVAL", title: `${s.title}: ${decision.replace("_", " ").toLowerCase()}`, body: note || undefined, link: `/projects/${s.projectId}/inputs?submission=${s.id}` });
-    await audit({ companyId: u.companyId, userId: u.id, projectId: s.projectId, action: `SUBMISSION_${decision}`, entityType: "DepartmentSubmission", entityId: s.id, details: { note } });
+    const d = z.object({ submissionId: z.string().min(1), decision: z.enum(["APPROVED", "REJECTED", "NEEDS_INFORMATION"]), note: z.string().max(2000) }).parse({ submissionId, decision, note: note ?? "" });
+    // atomic: status gate, self-review block, item approvals and the pending approval are decided together
+    const s = await db.$transaction((tx) => reviewSubmission(tx, u, d.submissionId, d.decision, d.note));
+    await notify({ userIds: [s.submittedById] }, { companyId: u.companyId, projectId: s.projectId, type: "APPROVAL", title: `${s.title}: ${d.decision.replace("_", " ").toLowerCase()}`, body: d.note || undefined, link: `/projects/${s.projectId}/inputs?submission=${s.id}` });
     revalidatePath(`/projects/${s.projectId}`, "layout");
     revalidatePath("/approvals");
   }, "Review recorded");

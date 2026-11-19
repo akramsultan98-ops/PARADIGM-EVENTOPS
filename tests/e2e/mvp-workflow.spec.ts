@@ -37,8 +37,9 @@ test("event from brief to actual-vs-planned", async ({ page }) => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
   });
 
-  await test.step("3. Production submits structured requirements (10-step form)", async () => {
-    await login(page, "production");
+  // four-eyes principle: inputs are entered by one person and technically approved by another (the department manager)
+  await test.step("3. Production engineer submits structured requirements (10-step form)", async () => {
+    await login(page, "production.member");
     await page.goto(`/production/new?project=${projectId}`);
     await page.evaluate(() => localStorage.clear());
     await page.goto(`/production/new?project=${projectId}`);
@@ -80,8 +81,8 @@ test("event from brief to actual-vs-planned", async ({ page }) => {
     await expect(page.getByText("BKD-E2E E2E backdrop")).toBeVisible();
   });
 
-  await test.step("4. AV submits equipment requirements", async () => {
-    await login(page, "av");
+  await test.step("4. AV requirements entered by the PM coordinator (the AV manager approves them)", async () => {
+    await login(page, "pm");
     await page.goto(`/av/new?project=${projectId}`);
     await field(page, "Inventory model").selectOption({ label: "LED-P39 — LED cabinet P3.9 500×500" });
     await field(page, "Qty").fill("24");

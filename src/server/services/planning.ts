@@ -171,22 +171,31 @@ export async function generatePlan(ctx: Ctx, projectId: string, opts: { asOf?: D
   return { ...result, plan };
 }
 
-/** Approve the integrated plan. Requires all participating departments' technical inputs to be approved. */
+/**
+ * Approve the integrated plan. Requires all participating departments' technical inputs to be approved.
+ * Atomic (P1-3): the PENDING approval is claimed with a conditional update inside the transaction, so a
+ * second approver (or a concurrent plan regeneration) cannot also decide it.
+ */
 export async function approvePlan(ctx: Ctx, approvalId: string, note: string | null, acknowledgeIssues: boolean) {
-  const a = await db.approval.findFirstOrThrow({ where: { id: approvalId, companyId: ctx.companyId, entityType: "PLAN", status: "PENDING" } });
-  const version = await db.scheduleVersion.findFirstOrThrow({ where: { id: a.entityId, project: { companyId: ctx.companyId } } });
-  const plan = version.snapshot as unknown as PlanResult;
-  const pending = await db.departmentSubmission.findMany({ where: { projectId: version.projectId, status: { in: ["DRAFT", "NEEDS_INFORMATION", "SUBMITTED", "UNDER_REVIEW", "EXTRACTING"] } }, include: { department: true } });
-  if (pending.length) throw new Error(`Department technical approvals outstanding: ${[...new Set(pending.map((p) => p.department.name))].join(", ")}`);
-  if (plan.readiness.errors > 0 && !acknowledgeIssues) throw new Error(`The plan has ${plan.readiness.errors} open error(s). Tick "acknowledge open issues" to approve with documented exceptions.`);
-  await db.$transaction([
-    db.scheduleVersion.updateMany({ where: { projectId: version.projectId, status: "APPROVED" }, data: { status: "SUPERSEDED" } }),
-    db.scheduleVersion.update({ where: { id: version.id }, data: { status: "APPROVED", approvedById: ctx.userId, approvedAt: new Date() } }),
-    db.approval.update({ where: { id: a.id }, data: { status: "APPROVED", approverId: ctx.userId, decidedAt: new Date(), decisionNote: [note, plan.readiness.errors ? `Approved with ${plan.readiness.errors} acknowledged open issue(s)` : null].filter(Boolean).join(" — ") || null } }),
-    db.project.update({ where: { id: version.projectId }, data: { status: "APPROVED" } }),
-    db.calculationRecord.updateMany({ where: { projectId: version.projectId, state: "CALCULATED" }, data: { state: "APPROVED", approvedById: ctx.userId } }),
-    db.auditLog.create({ data: { companyId: ctx.companyId, userId: ctx.userId, projectId: version.projectId, action: "PLAN_APPROVED", entityType: "ScheduleVersion", entityId: version.id, details: json({ version: version.version, acknowledgedErrors: plan.readiness.errors, note }) } }),
-  ]);
+  const version = await db.$transaction(async (tx) => {
+    const a = await tx.approval.findFirst({ where: { id: approvalId, companyId: ctx.companyId, entityType: "PLAN" } });
+    if (!a) throw new Error("Approval not found");
+    if (a.status !== "PENDING") throw new Error(`This approval has already been decided (${a.status.toLowerCase().replace(/_/g, " ")})`);
+    const v = await tx.scheduleVersion.findFirstOrThrow({ where: { id: a.entityId, project: { companyId: ctx.companyId } } });
+    const plan = v.snapshot as unknown as PlanResult;
+    const pending = await tx.departmentSubmission.findMany({ where: { projectId: v.projectId, status: { in: ["DRAFT", "NEEDS_INFORMATION", "SUBMITTED", "UNDER_REVIEW", "EXTRACTING", "REVISED", "REJECTED"] } }, include: { department: true } });
+    if (pending.length) throw new Error(`Department technical approvals outstanding: ${[...new Set(pending.map((p) => p.department.name))].join(", ")}`);
+    if (plan.readiness.errors > 0 && !acknowledgeIssues) throw new Error(`The plan has ${plan.readiness.errors} open error(s). Tick "acknowledge open issues" to approve with documented exceptions.`);
+    const claimed = await tx.approval.updateMany({ where: { id: a.id, status: "PENDING" }, data: { status: "APPROVED", approverId: ctx.userId, decidedAt: new Date(), decisionNote: [note, plan.readiness.errors ? `Approved with ${plan.readiness.errors} acknowledged open issue(s)` : null].filter(Boolean).join(" — ") || null } });
+    if (claimed.count !== 1) throw new Error("This approval has already been decided by someone else");
+    await tx.scheduleVersion.updateMany({ where: { projectId: v.projectId, status: "APPROVED" }, data: { status: "SUPERSEDED" } });
+    const promoted = await tx.scheduleVersion.updateMany({ where: { id: v.id, status: "UNDER_REVIEW" }, data: { status: "APPROVED", approvedById: ctx.userId, approvedAt: new Date() } });
+    if (promoted.count !== 1) throw new Error("This plan version is no longer under review (a newer version was generated)");
+    await tx.project.update({ where: { id: v.projectId }, data: { status: "APPROVED" } });
+    await tx.calculationRecord.updateMany({ where: { projectId: v.projectId, state: "CALCULATED" }, data: { state: "APPROVED", approvedById: ctx.userId } });
+    await tx.auditLog.create({ data: { companyId: ctx.companyId, userId: ctx.userId, projectId: v.projectId, action: "PLAN_APPROVED", entityType: "ScheduleVersion", entityId: v.id, details: json({ version: v.version, acknowledgedErrors: plan.readiness.errors, note }) } });
+    return v;
+  });
   await notify({ roles: ["PROJECT_MANAGER", "ACCOUNT_MANAGER", "PRODUCTION_MANAGER", "AV_MANAGER", "LOGISTICS_MANAGER", "ACCOMMODATION_MANAGER", "CREATIVE_MANAGER", "PROCUREMENT_MANAGER", "FINANCE"] }, { companyId: ctx.companyId, projectId: version.projectId, type: "SCHEDULE", title: `Master plan v${version.version} approved`, link: `/projects/${version.projectId}` });
   return version;
 }

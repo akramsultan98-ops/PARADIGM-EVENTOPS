@@ -22,7 +22,7 @@ beforeAll(async () => {
 
 describe("seeded demo environment", () => {
   it("contains connected, clearly labelled demo data", async () => {
-    expect(await db.project.count()).toBe(4);
+    expect(await db.project.count({ where: { isDemo: true } })).toBe(4); // other suites may add their own scratch projects
     expect(await db.user.count({ where: { isDemo: true } })).toBe(12);
     const p = await db.project.findUniqueOrThrow({ where: { id: aswanId } });
     expect(p.isDemo).toBe(true);

@@ -7,9 +7,10 @@ import { assertCan, requireUser } from "@/lib/auth/session";
 import { projectScope } from "@/lib/scope";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
-import { fromLocalInput } from "@/lib/format";
 import { buildSnapshot } from "@/server/services/snapshot";
 import { loadChangeTarget } from "@/server/services/changes";
+import { FINANCIAL_CHANGE_FIELDS, normaliseChanges, projectDatesAfter, type NormalisedChange } from "@/server/services/change-validation";
+import { canReadFinancials } from "@/lib/financial";
 import { runPlanningPipeline, type PlanResult } from "@/engines/pipeline";
 import { applyScenario, parseWhatIf, type ScenarioAssumptions } from "@/engines/whatif";
 import { compareImpact } from "@/engines/impact";
@@ -74,11 +75,12 @@ const changeSchema = z.object({
   title: z.string().min(3).max(200),
   entityType: z.enum(["ProductionItem", "Project", "Vehicle", "EquipmentRequirement"]),
   entityId: z.string(),
-  changes: z.array(z.object({ field: z.string(), to: z.union([z.string(), z.number(), z.boolean()]) })).min(1),
+  changes: z.array(z.object({ field: z.string(), to: z.union([z.string(), z.number(), z.boolean()]) })).min(1).max(10),
 });
-const ALLOWED: Record<string, string[]> = { ProductionItem: ["widthM", "heightM", "depthM", "quantity"], Project: ["eventStart", "eventEnd", "setupStart", "participants", "budgetAmount"], Vehicle: ["available"], EquipmentRequirement: ["quantity", "backupQuantity"] };
 
-function applyToSnapshot(s: ProjectSnapshot, c: z.infer<typeof changeSchema>): ProjectSnapshot {
+type ValidChange = { entityType: string; entityId: string; changes: NormalisedChange[] };
+
+function applyToSnapshot(s: ProjectSnapshot, c: ValidChange): ProjectSnapshot {
   const snap = structuredClone(s);
   for (const ch of c.changes) {
     if (c.entityType === "ProductionItem") {
@@ -90,7 +92,7 @@ function applyToSnapshot(s: ProjectSnapshot, c: z.infer<typeof changeSchema>): P
       } else (it as unknown as Record<string, unknown>)[ch.field] = Number(ch.to);
     } else if (c.entityType === "Project") {
       const p = snap.project as unknown as Record<string, unknown>;
-      p[ch.field] = ["eventStart", "eventEnd", "setupStart"].includes(ch.field) ? fromLocalInput(String(ch.to)) : Number(ch.to);
+      p[ch.field] = ["eventStart", "eventEnd", "setupStart"].includes(ch.field) ? new Date(String(ch.to)) : Number(ch.to);
     } else if (c.entityType === "Vehicle") {
       const v = snap.vehicles.find((x) => x.id === c.entityId);
       if (v) v.available = ch.to === true || ch.to === "true";
@@ -106,16 +108,25 @@ export async function proposeChangeAction(input: z.input<typeof changeSchema>) {
   return run(async () => {
     const u = await requireUser();
     assertCan(u, "submission.create");
-    const c = changeSchema.parse(input);
-    for (const ch of c.changes) if (!ALLOWED[c.entityType].includes(ch.field)) throw new Error(`Field ${ch.field} cannot be changed through a change request`);
+    const input0 = changeSchema.parse(input);
+    // P1-3 / P2-B: every value typed, ranged and normalised BEFORE anything is stored
+    const changes = normaliseChanges(input0.entityType, input0.changes);
+    if (changes.some((ch) => FINANCIAL_CHANGE_FIELDS.has(ch.field)) && !canReadFinancials(u)) throw new Error("Changing the budget requires the budget.read permission");
+    const c: ValidChange & { projectId: string; title: string } = { ...input0, changes };
     const p = await db.project.findFirstOrThrow({ where: { ...projectScope(u), id: c.projectId } });
-    const snap = await buildSnapshot(u.companyId, p.id, new Date());
+    if (["COMPLETED", "CANCELLED"].includes(p.status)) throw new Error(`Project is ${p.status.toLowerCase()}`);
     const current = await loadChangeTarget(c.entityType, c.entityId, p.id, u.companyId); // target must belong to this project / company
+    if (c.entityType === "Project") projectDatesAfter(p, changes);
+    const snap = await buildSnapshot(u.companyId, p.id, new Date());
     const base = runPlanningPipeline(snap);
     const next = runPlanningPipeline(applyToSnapshot(snap, c));
     const impact = compareImpact(base, next);
-    const change = await db.projectChange.create({ data: { projectId: p.id, title: c.title, entityType: c.entityType, entityId: c.entityId, changes: json(c.changes.map((ch) => ({ field: ch.field, from: current[ch.field] ?? null, to: ch.to }))), impact: json({ ...impact, after: summarize(next), before: summarize(base) }), requestedById: u.id } });
-    await db.approval.create({ data: { companyId: u.companyId, projectId: p.id, entityType: "CHANGE", entityId: change.id, title: `Change request: ${c.title}`, description: impact.summary, requiredRole: "PROJECT_MANAGER", requestedById: u.id } });
+    const fromValue = (v: unknown) => (v instanceof Date ? v.toISOString() : v != null && typeof v === "object" ? Number(v) : v ?? null);
+    const change = await db.$transaction(async (tx) => {
+      const created = await tx.projectChange.create({ data: { projectId: p.id, title: c.title, entityType: c.entityType, entityId: c.entityId, changes: json(changes.map((ch) => ({ field: ch.field, from: fromValue(current[ch.field]), to: ch.to }))), impact: json({ ...impact, after: summarize(next), before: summarize(base) }), requestedById: u.id } });
+      await tx.approval.create({ data: { companyId: u.companyId, projectId: p.id, entityType: "CHANGE", entityId: created.id, title: `Change request: ${c.title}`, description: impact.summary, requiredRole: "PROJECT_MANAGER", requestedById: u.id } });
+      return created;
+    });
     await notify({ roles: ["PROJECT_MANAGER"], departments: impact.approvalsRequired }, { companyId: u.companyId, projectId: p.id, type: "APPROVAL", title: `Change request on ${p.name}: ${c.title}`, body: impact.summary, link: `/projects/${p.id}/planning` });
     await audit({ companyId: u.companyId, userId: u.id, projectId: p.id, action: "CHANGE_PROPOSED", entityType: "ProjectChange", entityId: change.id, details: json(c.changes) });
     revalidatePath(`/projects/${p.id}/planning`);
