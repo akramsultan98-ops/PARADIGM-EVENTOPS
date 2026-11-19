@@ -50,12 +50,19 @@ Fixes for the independent audit (P1-1…P3) and the Codex review on `c053125`. E
 | P2-H (+Codex P2) | RFQ without permission; foreign leads/room types/tasks; viewer comments | RFQ requires `procurement.manage`; ownership checks; read-only roles cannot comment | `financial-confidentiality.test.ts` (RFQ), `p2-guards.test.ts` P2-H |
 | P3 | CSP/HSTS, backup credentials/encryption, password-change sessions, proxy IP, duplicate approvals, code collisions, AI evidence, rate units | Headers; encrypted backup via PGPASSWORD; session-version bump; `TRUST_PROXY_HOPS`; partial unique index (one PENDING approval per entity); retry on code collision; evidence must be quoted from input; unit preserved on standards approval | `p3-hardening` (unit + integration incl. real pg_dump + decrypt, argv inspection), E2E header test |
 
+### Codex review of `55bd7b7` (3 × P2) — fixed
+| Finding | Fix | Regression test |
+|---|---|---|
+| Production save checked approval outside the write transaction (review could commit in between) | Save runs in one transaction with `SELECT … FOR UPDATE` on the submission and item rows; check + writes + review request together; editing a pending submission withdraws its review | `codex-followups.test.ts`: deterministic races in both orders with real row locks; withdrawal test. Mutation (no `FOR UPDATE`): fails |
+| Login rate-limit map unbounded; unique e-mails bypass account limits | Limiter sweeps expired buckets and caps size (oldest evicted); login checks a global limit (`LOGIN_GLOBAL_LIMIT_PER_MIN`, 300) and, behind a trusted proxy, a per-IP limit BEFORE per-e-mail buckets | unit (sweep + cap); integration (60 unique e-mails → global limit, ≤ 41 buckets) |
+| Rejected Office archives already written to storage | All validation (ZIP inspection, extraction) happens before `put`; the file is removed if the DB record cannot be created | `codex-followups.test.ts` storage file count unchanged. Mutation (old order): fails |
+
 ### Tests executed (session 3, final)
 | Suite | Result |
 |---|---|
 | `npm run lint` / `npm run typecheck` | clean / clean |
-| `npm run test:unit` | **111 / 111** |
-| `npm run test:integration` (PostgreSQL) | **91 / 91** |
+| `npm run test:unit` | **112 / 112** |
+| `npm run test:integration` (PostgreSQL) | **96 / 96** |
 | `npm run test:e2e` (desktop + mobile, dev server with CSP) | **13 / 13** |
 | `npm run build` | successful (Google Fonts fetch flaked once, retry succeeded) |
 | Production smoke under CSP (`next start`) | hydration + server action round-trip OK, 0 console/CSP errors |
@@ -67,7 +74,7 @@ Fixes for the independent audit (P1-1…P3) and the Codex review on `c053125`. E
 - Cross-project labour uses a lower bound per project per day (largest planned crew) — never overstates commitments; exact per-hour overlap is not modelled.
 - Manual reschedules on a non-executing project are replaced when the plan is regenerated (by design: the plan is recalculated); approved schedules require PM authority to change.
 - Vehicle availability change requests affect the vehicle company-wide (fleet is a company resource).
-- Rate limiting is in-memory per process; `npm audit`: 7 advisories needing major upgrades (Prisma 7, Next 16); Docker image build not run (no daemon); live Claude path not exercised (evidence verification is unit-tested); Egypt DST not modelled.
+- Rate limiting is in-memory per process (bounded; the global login limit can be exhausted by a flood — a trade-off against memory exhaustion; use a shared store + per-IP limits behind a trusted proxy); `npm audit`: 7 advisories needing major upgrades (Prisma 7, Next 16); Docker image build not run (no daemon); live Claude path not exercised (evidence verification is unit-tested); Egypt DST not modelled.
 - Integration test DB is reset with `SEED_FORCE_RESET=true` (test database only).
 
 ## Session 2 — pre-merge review & hardening

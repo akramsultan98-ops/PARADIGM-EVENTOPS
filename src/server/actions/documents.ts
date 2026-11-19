@@ -30,11 +30,12 @@ export async function uploadDocumentAction(form: FormData) {
     if (taskId) await db.task.findFirstOrThrow({ where: { id: taskId, projectId: projectId! } }).catch(() => { throw new Error("Task does not belong to this project"); });
     const buf = Buffer.from(await file.arrayBuffer());
     const mime = validateUpload(file.name, file.type, buf);
+    if (mime.includes("openxmlformats")) inspectZip(buf); // every check happens BEFORE anything is written to storage (Codex P2)
+    const text = await extractDocumentText(buf, mime).catch(() => ({ pages: [] as string[], preview: null as string | null }));
     const key = newStorageKey(u.companyId, file.name);
     await storage().put(key, buf, mime);
-    if (mime.includes("openxmlformats")) inspectZip(buf); // refuse archive bombs before storing or parsing
-    const text = await extractDocumentText(buf, mime).catch(() => ({ pages: [] as string[], preview: null as string | null }));
-    const doc = await db.uploadedDocument.create({ data: { companyId: u.companyId, projectId, uploadedById: u.id, fileName: file.name.slice(0, 200), mimeType: mime, sizeBytes: buf.length, storageKey: key, sha256: sha256(buf), category, textPreview: text.preview?.slice(0, 1000) ?? null } });
+    // the stored file is tracked by its UploadedDocument row; if that cannot be created, remove the file again
+    const doc = await db.uploadedDocument.create({ data: { companyId: u.companyId, projectId, uploadedById: u.id, fileName: file.name.slice(0, 200), mimeType: mime, sizeBytes: buf.length, storageKey: key, sha256: sha256(buf), category, textPreview: text.preview?.slice(0, 1000) ?? null } }).catch(async (e) => { await storage().remove(key); throw e; });
     let extracted = 0;
     for (const [i, pageText] of text.pages.slice(0, 200).entries()) {
       const ex = extractRuleBased(pageText);

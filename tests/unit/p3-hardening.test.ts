@@ -31,3 +31,23 @@ describe("P3 AI evidence must be quoted from the input", () => {
     expect(verifyEvidence(text, e)).toBe(e);
   });
 });
+
+describe("Codex P2: rate-limit memory is bounded", () => {
+  it("sweeps expired buckets and never grows past its cap", async () => {
+    const { rateLimit, rateLimitStats, __resetRateLimits } = await import("@/lib/rate-limit");
+    __resetRateLimits();
+    const real = Date.now;
+    let now = real();
+    Date.now = () => now;
+    try {
+      for (let i = 0; i < 2000; i++) rateLimit(`k${i}`, 1, 1000);
+      expect(rateLimitStats().keys).toBe(2000);
+      now += 61_000; // all windows expired and the sweep interval passed
+      rateLimit("fresh", 1, 1000);
+      expect(rateLimitStats().keys).toBe(1);
+      const cap = rateLimitStats().maxKeys;
+      for (let i = 0; i < cap + 500; i++) rateLimit(`live${i}`, 1, 3_600_000);
+      expect(rateLimitStats().keys).toBeLessThanOrEqual(cap);
+    } finally { Date.now = real; __resetRateLimits(); }
+  });
+});
