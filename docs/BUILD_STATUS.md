@@ -43,13 +43,17 @@ The MVP workflow (spec §38) is implemented and verified end-to-end through the 
 - **Lint** run for the first time: 4 unused-variable warnings fixed → clean.
 - **Migrations** verified: `prisma migrate diff --from-migrations … --to-schema-datamodel` → no difference.
 
+### PR review fixes (Codex findings on PR #1)
+- **Project scope bypass via search (P2):** `projectScope()` put the member/department restriction in a top-level `OR`, which `/projects?q=` and `/search?q=` overwrote with their own `OR` — department members could find any company project. The restriction now lives under `AND`. Regression test fails on the old code (member saw the probe project) and passes now.
+- **Approved production items editable (P1):** re-saving with an approved item's own `submissionId` skipped the guard and overwrote approved values; the submission row was also updated before the check. All checks now run before any write: approved submissions and approved items are rejected regardless of submission, and the submission must belong to Production. 3 action-level integration tests (2 fail on the old code).
+
 ## Tests executed (session 2, after the changes above)
 | Suite | Result |
 |---|---|
 | `npm run lint` | ✔ no warnings or errors |
 | `npm run typecheck` | clean |
 | `npm run test:unit` | **83 / 83** (adds 14 auth-guard tests) |
-| `npm run test:integration` | **11 / 11** |
+| `npm run test:integration` | **15 / 15** (adds 4 tests for the PR review fixes) |
 | `npm run test:e2e` (desktop + mobile) | **6 / 6** |
 | `npm run build` | successful, 47 routes (one transient Google Fonts fetch failure on first attempt — build needs network to fonts.googleapis.com) |
 | `pytest services/optimizer` | **3 / 3** |

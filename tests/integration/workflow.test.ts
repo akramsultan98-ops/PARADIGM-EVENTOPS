@@ -113,6 +113,21 @@ describe("tenant isolation", () => {
     await db.role.delete({ where: { id: role.id } });
     await db.company.delete({ where: { id: other.id } });
   });
+
+  it("keeps the membership restriction when search filters add their own OR (projects list & global search)", async () => {
+    const probe = await db.project.create({ data: { companyId, code: `SCOPE-PROBE-${Date.now()}`, name: "Scope probe confidential", client: "Probe client", category: "Corporate conference", location: "Cairo", participants: 10, setupStart: new Date("2027-01-08T06:00:00Z"), setupEnd: new Date("2027-01-09T20:00:00Z"), eventStart: new Date("2027-01-10T08:00:00Z"), eventEnd: new Date("2027-01-11T18:00:00Z") } });
+    try {
+      const member = await db.user.findUniqueOrThrow({ where: { email: "production.member@demo.eventops.local" }, include: { memberships: { include: { department: true } } } });
+      const mu = { id: member.id, companyId, role: "DEPARTMENT_MEMBER", approvalDepartment: null, departments: member.memberships.map((m) => ({ id: m.departmentId, key: m.department.key, name: m.department.name, isManager: false })), permissions: new Set() } as unknown as AuthUser;
+      const pm = { id: pmId, companyId, role: "PROJECT_MANAGER", approvalDepartment: null, departments: [], permissions: new Set() } as unknown as AuthUser;
+      const c = { contains: "scope probe", mode: "insensitive" as const };
+      const search = (u: AuthUser) => db.project.count({ where: { ...projectScope(u), OR: [{ name: c }, { client: c }, { code: c }] } });
+      expect(await search(mu)).toBe(0); // not a member and none of their departments assigned
+      expect(await search(pm)).toBe(1); // company-wide roles still find it
+    } finally {
+      await db.project.delete({ where: { id: probe.id } });
+    }
+  });
 });
 
 describe("exports", () => {

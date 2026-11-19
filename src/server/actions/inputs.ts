@@ -58,12 +58,16 @@ export async function saveProductionSubmissionAction(input: z.input<typeof produ
     }
     const missing = d.items.flatMap((it, i) => missingProduction({ name: it.name, category: it.category, quantity: it.quantity, widthM: it.widthM, heightM: it.heightM, depthM: it.depthM ?? (it.packedVolumeM3 ? 1 : null), material: it.boardMaterialId ? "board" : it.specs.length ? "specified" : null, thicknessMm: 1, finishing: it.finishing ?? null, color: it.color ?? null, paintCoats: it.paintCoats ?? (it.specs.some((s) => s.kind === "PAINT_SURFACE") ? 1 : null), constructionMethod: it.constructionMethod ?? null, installationDay: it.installationDay, notes: null }, i).filter((m) => m.field !== "drawing" || (!d.documentIds.length && it.specs.length === 0)));
     const status = d.submit ? (missing.length ? "NEEDS_INFORMATION" : "SUBMITTED") : "DRAFT";
-    const sub = d.submissionId
-      ? await db.departmentSubmission.update({ where: { id: (await db.departmentSubmission.findFirstOrThrow({ where: { id: d.submissionId, projectId: p.id } })).id }, data: { title: d.title, status, formStep: d.formStep, missingFields: json(missing), submittedAt: d.submit ? new Date() : undefined, version: { increment: 1 } } })
+    // Validate everything BEFORE writing: approved source data changes only through a change request.
+    const prior = d.submissionId ? await db.departmentSubmission.findFirstOrThrow({ where: { id: d.submissionId, projectId: p.id, departmentId: dep.id } }) : null;
+    if (prior?.status === "APPROVED") throw new Error("This submission is already approved — use a change request to modify it");
+    const approved = await db.productionItem.findMany({ where: { projectId: p.id, code: { in: d.items.map((it) => it.code.toUpperCase()) }, state: "APPROVED" }, select: { code: true } });
+    if (approved.length) throw new Error(`${approved.map((a) => a.code).join(", ")} ${approved.length > 1 ? "are" : "is"} already approved — use a change request to modify ${approved.length > 1 ? "them" : "it"}`);
+    const sub = prior
+      ? await db.departmentSubmission.update({ where: { id: prior.id }, data: { title: d.title, status, formStep: d.formStep, missingFields: json(missing), submittedAt: d.submit ? new Date() : undefined, version: { increment: 1 } } })
       : await db.departmentSubmission.create({ data: { projectId: p.id, departmentId: dep.id, submittedById: u.id, title: d.title, method: "FORM", status, formStep: d.formStep, missingFields: json(missing), submittedAt: d.submit ? new Date() : null } });
     for (const it of d.items) {
       const existing = await db.productionItem.findUnique({ where: { projectId_code: { projectId: p.id, code: it.code.toUpperCase() } } });
-      if (existing && existing.submissionId !== sub.id && existing.state === "APPROVED") throw new Error(`${it.code} is already approved — use a change request to modify it`);
       const data = { name: it.name, category: it.category, quantity: it.quantity, widthM: it.widthM, heightM: it.heightM, depthM: it.depthM, packedVolumeM3: it.packedVolumeM3, boardMaterialId: it.boardMaterialId || null, finishing: it.finishing, color: it.color, paintCoats: it.paintCoats, constructionMethod: it.constructionMethod, installationMethod: it.installationMethod, installationDay: it.installationDay, specialTools: it.specialTools, engineeringApprovalRequired: it.engineeringApprovalRequired, notes: it.notes, submissionId: sub.id, drawingStatus: (d.documentIds.length || it.specs.length ? "PROVIDED" : "MISSING") as "PROVIDED" | "MISSING", state: (status === "DRAFT" ? "ESTIMATED" : "UNDER_REVIEW") as "ESTIMATED" | "UNDER_REVIEW" };
       const item = existing ? await db.productionItem.update({ where: { id: existing.id }, data }) : await db.productionItem.create({ data: { ...data, projectId: p.id, code: it.code.toUpperCase() } });
       await db.productionSpecification.deleteMany({ where: { productionItemId: item.id } });
