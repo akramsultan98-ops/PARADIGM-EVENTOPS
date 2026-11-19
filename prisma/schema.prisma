@@ -1233,6 +1233,7 @@ model Task {
   requiresApproval Boolean    @default(false)
   sourceType       String? // PRODUCTION_ITEM | EQUIPMENT | CARGO | ACCOMMODATION | MANUAL
   sourceId         String?
+  planKey          String?
   generated        Boolean    @default(false)
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
