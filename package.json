@@ -18,7 +18,7 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:e2e": "playwright test --trace off",
-    "screenshots": "tsx scripts/screenshots.ts"
+    "qa:shots": "node scripts/shot.mjs"
   },
   "prisma": {
     "seed": "tsx --conditions=react-server prisma/seed.ts"
