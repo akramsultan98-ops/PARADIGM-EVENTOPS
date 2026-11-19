@@ -283,9 +283,9 @@ async function main() {
       const overrun = t.planKey === "FAB:BKD-01" ? 1.18 : t.planKey === "INST:BKD-01" ? 1.14 : t.planKey?.startsWith("PROC:") ? 1 : 1.04;
       await db.task.update({ where: { id: t.id }, data: { status: "COMPLETED", percentComplete: 100, actualStart: new Date(s), actualEnd: new Date(s + (e - s) * overrun) } });
     } else if (s <= now) {
-      const delayed = t.planKey?.startsWith("AVI:LED");
+      const delayed = t.planKey?.startsWith("AVI:SPK");
       await db.task.update({ where: { id: t.id }, data: { status: delayed ? "DELAYED" : "IN_PROGRESS", percentComplete: delayed ? 35 : 60, actualStart: new Date(s + (delayed ? 2 * H : 0)) } });
-      if (delayed) await db.executionUpdate.create({ data: { projectId: cai.id, taskId: t.id, userId: U("AV_MANAGER"), type: "DELAY", status: "DELAYED", message: "LED wall installation started 2 h late — rigging points at venue not released on time.", delayMinutes: 120, delayReason: "Venue access / rigging release", percentComplete: 35, createdAt: new Date(now - 1 * H) } });
+      if (delayed) await db.executionUpdate.create({ data: { projectId: cai.id, taskId: t.id, userId: U("AV_MANAGER"), type: "DELAY", status: "DELAYED", message: "Line-array installation running 2 h late — rigging points at venue not released on time (demo).", delayMinutes: 120, delayReason: "Venue access / rigging release", percentComplete: 35, createdAt: new Date(now - 1 * H) } });
     }
   }
   const done = await db.task.findMany({ where: { projectId: cai.id, status: "COMPLETED" }, take: 6, orderBy: { actualEnd: "desc" } });
@@ -318,7 +318,7 @@ async function main() {
   if (rental) await db.procurementRequest.update({ where: { id: rental.id }, data: { status: "RFQ_PREPARED", vendorId: vendors.get("V-AVRENT") } });
   await db.approval.create({ data: { companyId: C, entityType: "STANDARD", entityId: (await db.companyStandard.findFirstOrThrow({ where: { companyId: C, key: "PROPOSAL:CARPENTER:INSTALLATION" } })).id, title: "Standards change proposal: carpenter installation productivity 0.35 → 0.40 h/m²", description: "Proposed from DEMO-CAI-2611 actuals. Only a Super Admin may approve.", requiredRole: "SUPER_ADMIN" } });
 
-  await db.notification.create({ data: { companyId: C, userId: U("PROJECT_MANAGER"), projectId: cai.id, type: "DELAY", title: "LED wall installation delayed 2 h — Cairo Product Launch", link: `/execution?project=${cai.id}` } });
+  await db.notification.create({ data: { companyId: C, userId: U("PROJECT_MANAGER"), projectId: cai.id, type: "DELAY", title: "Line-array installation delayed 2 h — Cairo Product Launch", link: `/execution?project=${cai.id}` } });
   await db.notification.create({ data: { companyId: C, userId: U("FINANCE"), projectId: A, type: "APPROVAL", title: "Purchase request MAT:PLY-18 awaiting your approval", link: "/approvals" } });
 
   const counts = { users: await db.user.count(), projects: await db.project.count(), tasks: await db.task.count(), calcs: await db.calculationRecord.count(), risks: await db.risk.count(), approvals: await db.approval.count({ where: { status: "PENDING" } }) };
