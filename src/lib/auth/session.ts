@@ -71,8 +71,9 @@ export function canReviewDepartment(u: AuthUser, departmentKey: string) {
   return u.approvalDepartment === departmentKey || u.departments.some((d) => d.key === departmentKey && d.isManager);
 }
 
+/** For pages: users lacking the permission get the access-denied page (server-enforced). */
 export async function requirePermission(p: Permission): Promise<AuthUser> {
   const u = await requireUser();
-  assertCan(u, p);
+  if (!u.permissions.has(p)) redirect(`/forbidden?need=${encodeURIComponent(p)}`);
   return u;
 }

@@ -1,19 +1,21 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CircleHelp, Loader2, Save } from "lucide-react";
+import { Check, CircleHelp, Loader2, Paperclip, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, NativeSelect } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { confirmExtractionAction } from "@/server/actions/inputs";
+import { uploadDocumentAction } from "@/server/actions/documents";
 import type { MissingField, ProductionDraft } from "@/ai/types";
 
 type Extracted = { engine: string; engineNote?: string; model?: string; aiError?: string | null; production: ProductionDraft[]; av: { description: string; category: string | null; quantity: number | null; backupQuantity: number | null }[]; evidence: { field: string; snippet: string }[]; assumptionsMade: string[] };
 const CATS = ["STAGE", "BACKDROP", "PODIUM", "BOOTH", "COUNTER", "FURNITURE", "DECORATIVE", "SIGNAGE", "CARPENTRY", "FLOORING", "OTHER"];
 
 /** Employee reviews and corrects the extracted draft; confirmation creates DRAFT/SUBMITTED items — never approved ones. */
-export function ExtractionReview({ submissionId, status, extracted, missing, materials, canEdit }: { submissionId: string; status: string; extracted: Extracted; missing: MissingField[]; materials: { id: string; code: string; name: string; category: string }[]; canEdit: boolean }) {
+export function ExtractionReview({ submissionId, projectId, status, extracted, missing, materials, canEdit }: { submissionId: string; projectId: string; status: string; extracted: Extracted; missing: MissingField[]; materials: { id: string; code: string; name: string; category: string }[]; canEdit: boolean }) {
+  const [docs, setDocs] = useState<{ id: string; name: string }[]>([]);
   const [items, setItems] = useState(() => extracted.production.map((p, i) => ({
     code: `NEW-${String(i + 1).padStart(2, "0")}`, name: p.name ?? "", category: p.category ?? "OTHER", quantity: String(p.quantity ?? 1), widthM: p.widthM?.toString() ?? "", heightM: p.heightM?.toString() ?? "", depthM: p.depthM?.toString() ?? "", packedVolumeM3: "",
     boardMaterialId: materials.find((m) => m.category === "BOARD" && p.material && m.name.toLowerCase().includes(p.material.toLowerCase().split(" ")[0]))?.id ?? "", finishing: p.finishing ?? "", color: p.color ?? "", paintCoats: p.paintCoats?.toString() ?? "", installationDay: p.installationDay?.toString() ?? "", constructionMethod: p.constructionMethod ?? "", notes: [p.notes, p.material ? `Material stated: ${p.material}${p.thicknessMm ? ` ${p.thicknessMm} mm` : ""}` : null].filter(Boolean).join(" · "),
@@ -23,7 +25,7 @@ export function ExtractionReview({ submissionId, status, extracted, missing, mat
   const editable = canEdit && ["NEEDS_INFORMATION", "DRAFT", "REJECTED"].includes(status);
   const set = (i: number, k: string, v: string) => setItems((s) => s.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
   const save = (submit: boolean) => start(async () => {
-    const r = await confirmExtractionAction(submissionId, items.map((it) => ({ ...it, category: it.category as never, quantity: Number(it.quantity) || 1, boardMaterialId: it.boardMaterialId || null, engineeringApprovalRequired: false, specs: [] })), submit);
+    const r = await confirmExtractionAction(submissionId, items.map((it) => ({ ...it, category: it.category as never, quantity: Number(it.quantity) || 1, boardMaterialId: it.boardMaterialId || null, engineeringApprovalRequired: false, specs: [] })), submit, docs.map((d) => d.id));
     if (r.ok) { const d = r.data as { status: string; missing: unknown[] }; toast(submit ? (d.status === "SUBMITTED" ? "Submitted for technical review" : `Saved — ${d.missing.length} item(s) still missing`) : "Draft saved"); router.refresh(); }
     else toast(r.error, { tone: "error" });
   });
@@ -54,6 +56,13 @@ export function ExtractionReview({ submissionId, status, extracted, missing, mat
       ))}
       {extracted.av.length > 0 && <section><div className="section-title mb-1">Extracted AV lines</div><ul className="text-sm">{extracted.av.map((a, i) => <li key={i}>• {a.quantity ?? "?"} × {a.description} {a.backupQuantity ? `(+${a.backupQuantity} backup)` : ""} <span className="text-2xs text-muted-foreground">{a.category}</span></li>)}</ul><p className="mt-1 text-2xs text-muted-foreground">Enter AV lines with inventory models in the AV requirements form.</p></section>}
       {extracted.assumptionsMade.length > 0 && <p className="text-2xs text-muted-foreground">Interpretations: {extracted.assumptionsMade.join("; ")}</p>}
+      {editable && items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed p-3">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-primary"><Paperclip className="size-4" />Attach technical drawing<input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.docx" data-testid="drawing-upload" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const fd = new FormData(); fd.set("file", f); fd.set("projectId", projectId); fd.set("category", "DRAWING"); start(async () => { const r = await uploadDocumentAction(fd); if (r.ok) { setDocs((d) => [...d, { id: (r.data as { id: string }).id, name: f.name }]); toast(`${f.name} attached`); } else toast(r.error, { tone: "error" }); }); e.target.value = ""; }} /></label>
+          {docs.map((d) => <span key={d.id} className="rounded bg-muted px-2 py-0.5 text-xs">{d.name}</span>)}
+          {!docs.length && <span className="text-2xs text-muted-foreground">Drawings are required before technical approval</span>}
+        </div>
+      )}
       {editable && items.length > 0 && <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" disabled={pending} onClick={() => save(false)}><Save />Save draft</Button><Button disabled={pending} onClick={() => save(true)}>{pending ? <Loader2 className="animate-spin" /> : <Check />}Confirm & submit</Button></div>}
     </div>
   );

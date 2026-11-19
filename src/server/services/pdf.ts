@@ -6,6 +6,10 @@ import { BRAND } from "@/config/brand";
 /** Branded A4 PDF helper (pdfkit standard fonts — Latin text; Arabic PDF rendering requires an embedded Arabic font, see docs). */
 export function brandedPdf(title: string, subtitle: string, demo: boolean) {
   const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true, info: { Title: title, Author: BRAND.product, Creator: BRAND.product } });
+  // Standard PDF fonts are WinAnsi: map unsupported symbols; non-Latin text needs an embedded font (documented limitation)
+  const safe = (v: string) => v.replace(/→/g, "->").replace(/■/g, "[!]").replace(/□/g, "[ ]").replace(/≥/g, ">=").replace(/≤/g, "<=").replace(/[^\x00-\xFF—–‘’“”•…€™]/g, "?");
+  const rawText = doc.text.bind(doc) as (...a: unknown[]) => PDFKit.PDFDocument;
+  (doc as unknown as { text: (...a: unknown[]) => PDFKit.PDFDocument }).text = (s: unknown, ...rest: unknown[]) => rawText(typeof s === "string" ? safe(s) : s, ...rest);
   const chunks: Buffer[] = [];
   doc.on("data", (c) => chunks.push(c));
   const done = new Promise<Buffer>((r) => doc.on("end", () => r(Buffer.concat(chunks))));

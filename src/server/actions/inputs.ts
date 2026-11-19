@@ -106,11 +106,12 @@ export async function conversationalExtractAction(projectId: string, department:
 }
 
 /** Employee-confirmed (corrected) extraction → production items as DRAFT (never auto-approved). */
-export async function confirmExtractionAction(submissionId: string, items: z.input<typeof itemSchema>[], submit: boolean) {
+export async function confirmExtractionAction(submissionId: string, items: z.input<typeof itemSchema>[], submit: boolean, documentIds: string[] = []) {
   return run(async () => {
     const u = await requireUser();
     const sub = await db.departmentSubmission.findFirstOrThrow({ where: { id: submissionId, project: projectScope(u) }, include: { department: true } });
-    const r = await saveProductionSubmissionAction({ projectId: sub.projectId, submissionId: sub.id, title: sub.title.replace("Conversational input — ", "Confirmed: "), items, submit, formStep: 10 });
+    const linked = (await db.uploadedDocument.findMany({ where: { OR: [{ id: { in: documentIds } }, { submissionId: sub.id }], companyId: u.companyId, projectId: sub.projectId }, select: { id: true } })).map((d) => d.id);
+    const r = await saveProductionSubmissionAction({ projectId: sub.projectId, submissionId: sub.id, title: sub.title.replace("Conversational input — ", "Confirmed: "), items, submit, formStep: 10, documentIds: linked });
     if (!r.ok) throw new Error(r.error);
     await db.submissionField.updateMany({ where: { submissionId }, data: { state: "VERIFIED" } });
     return r.data;

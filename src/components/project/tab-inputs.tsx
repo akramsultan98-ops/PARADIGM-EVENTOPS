@@ -55,7 +55,7 @@ export async function InputsTab({ id, sp }: { id: string; sp: Record<string, str
               {selected.reviewNote && <div className="rounded-md border bg-muted/50 p-3 text-sm"><span className="font-semibold">Review note: </span>{selected.reviewNote}</div>}
               {selected.rawText && <section><div className="section-title mb-1">Original input</div><blockquote className="rounded-md border-s-4 border-primary/50 bg-muted/40 px-3 py-2 text-sm italic">{selected.rawText}</blockquote></section>}
               {selected.method === "AI_CONVERSATION" && selected.extracted && (
-                <ExtractionReview submissionId={selected.id} status={selected.status} extracted={selected.extracted as never} missing={(selected.missingFields as MissingField[] | null) ?? []} materials={materials} canEdit={u.permissions.has("submission.create")} />
+                <ExtractionReview submissionId={selected.id} projectId={id} status={selected.status} extracted={selected.extracted as never} missing={(selected.missingFields as MissingField[] | null) ?? []} materials={materials} canEdit={u.permissions.has("submission.create")} />
               )}
               {selected.method !== "AI_CONVERSATION" && Array.isArray(selected.missingFields) && (selected.missingFields as unknown as MissingField[]).length > 0 && (
                 <section><div className="section-title mb-1">Missing information</div><ul className="space-y-1 text-sm">{(selected.missingFields as unknown as MissingField[]).map((m, i) => <li key={i} className="rounded-md bg-danger-soft/50 px-3 py-1.5 text-danger">{m.question}</li>)}</ul></section>
