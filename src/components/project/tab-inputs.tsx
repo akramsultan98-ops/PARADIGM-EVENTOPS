@@ -14,7 +14,7 @@ import { ExtractionReview } from "./extraction-review";
 import type { MissingField } from "@/ai/types";
 
 export async function InputsTab({ id, sp }: { id: string; sp: Record<string, string | undefined> }) {
-  const { u, locale, project: p } = await projectContext(id);
+  const { u, locale } = await projectContext(id);
   const subs = await db.departmentSubmission.findMany({ where: { projectId: id }, include: { department: true, submittedBy: { select: { name: true } }, reviewer: { select: { name: true } }, _count: { select: { productionItems: true, equipmentReqs: true, documents: true } } }, orderBy: [{ department: { name: "asc" } }, { updatedAt: "desc" }] });
   const selected = sp.submission ? await db.departmentSubmission.findFirst({ where: { id: sp.submission, projectId: id }, include: { department: true, fields: true, documents: true, productionItems: { include: { specs: true } }, equipmentReqs: { include: { equipment: true } }, submittedBy: { select: { name: true } } } }) : null;
   const materials = selected?.method === "AI_CONVERSATION" ? await db.material.findMany({ where: { companyId: u.companyId, category: { in: ["BOARD", "PAINT", "PRIMER", "TIMBER"] } }, select: { id: true, code: true, name: true, category: true } }) : [];

@@ -5,7 +5,7 @@ import { loginAction } from "@/server/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 
-export function LoginForm({ next, demo, labels }: { next?: string; demo: { email: string; role: string }[]; labels: Record<string, string> }) {
+export function LoginForm({ next, demo, demoPassword, labels }: { next?: string; demo: { email: string; role: string }[]; demoPassword?: string; labels: Record<string, string> }) {
   const [state, action, pending] = useActionState(loginAction, {});
   const email = useRef<HTMLInputElement>(null);
   const pass = useRef<HTMLInputElement>(null);
@@ -21,10 +21,10 @@ export function LoginForm({ next, demo, labels }: { next?: string; demo: { email
       {demo.length > 0 && (
         <div className="mt-8 rounded-lg border border-dashed border-warning/40 bg-warning-soft/40 p-3">
           <div className="text-2xs font-semibold uppercase tracking-wider text-warning">{labels.demoAccounts}</div>
-          <p className="mt-1 text-2xs text-muted-foreground">Development only · password <code className="rounded bg-card px-1">EventOps!2026</code> (or DEMO_PASSWORD)</p>
+          <p className="mt-1 text-2xs text-muted-foreground">Development only · password <code className="rounded bg-card px-1">{demoPassword}</code></p>
           <div className="mt-2 grid grid-cols-2 gap-1">
             {demo.map((d) => (
-              <button key={d.email} type="button" className="truncate rounded px-2 py-1 text-start text-xs hover:bg-card" onClick={() => { if (email.current) email.current.value = d.email; if (pass.current) pass.current.value = "EventOps!2026"; }}>
+              <button key={d.email} type="button" className="truncate rounded px-2 py-1 text-start text-xs hover:bg-card" onClick={() => { if (email.current) email.current.value = d.email; if (pass.current) pass.current.value = demoPassword ?? ""; }}>
                 {d.role}
               </button>
             ))}

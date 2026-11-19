@@ -5,6 +5,7 @@ import { ParadigmLogo } from "@/components/brand/logo";
 import { BRAND } from "@/config/brand";
 import { LoginForm } from "./login-form";
 import { ROLE_LABELS } from "@/lib/permissions";
+import { demoLoginEnabled, demoPassword } from "@/lib/auth/demo";
 
 export const metadata = { title: "Sign in" };
 
@@ -15,7 +16,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   if (await getCurrentUser()) redirect("/dashboard");
   const { t } = await getDict();
   const { next } = await searchParams;
-  const demo = process.env.ENABLE_DEMO_LOGIN === "true" ? DEMO.map((k) => ({ email: `${k}@demo.eventops.local`, role: ROLE_LABELS[DEMO_ROLES[k]] })) : [];
+  const demoOn = demoLoginEnabled();
+  const demo = demoOn ? DEMO.map((k) => ({ email: `${k}@demo.eventops.local`, role: ROLE_LABELS[DEMO_ROLES[k]] })) : [];
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
       <section className="relative flex flex-col justify-between overflow-hidden bg-brand-navy px-6 py-8 text-white sm:px-10 lg:px-14 lg:py-12">
@@ -40,7 +42,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="w-full max-w-sm">
           <h2 className="font-display text-xl font-semibold">{t.login.title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{t.login.subtitle}</p>
-          <LoginForm next={next} demo={demo} labels={{ email: t.login.email, password: t.login.password, signIn: t.login.signIn, invalid: t.login.invalid, demoAccounts: t.login.demoAccounts }} />
+          <LoginForm next={next} demo={demo} demoPassword={demoOn ? demoPassword() : undefined} labels={{ email: t.login.email, password: t.login.password, signIn: t.login.signIn, invalid: t.login.invalid, demoAccounts: t.login.demoAccounts }} />
           <p className="mt-8 text-center text-2xs text-muted-foreground">{BRAND.product} · {BRAND.organization}</p>
         </div>
       </section>

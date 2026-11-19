@@ -1,6 +1,6 @@
 # Build status — PARADIGM EVENTOPS
 
-_Last updated: 2026-11-19 (session 1). Read this first when resuming work._
+_Last updated: 2026-11-19 (session 2 — pre-PR review & hardening). Read this first when resuming work._
 
 ## Summary
 The MVP workflow (spec §38) is implemented and verified end-to-end through the real UI by an automated Playwright test. The application is a working Next.js 15 + PostgreSQL/Prisma platform with deterministic planning engines, role-based workspaces, approvals, execution tracking and exports. Demo data is connected and clearly labelled.
@@ -32,7 +32,30 @@ The MVP workflow (spec §38) is implemented and verified end-to-end through the 
 | OR-Tools CP-SAT service + adapter + `/api/projects/[id]/optimize` (advisory) | ✅ solver tested; not wired into the UI |
 | Docker (standalone image, compose with Postgres + optional optimizer), health check, backup script | ✅ written; **docker build not run here** (no Docker daemon in this environment) |
 
-## Tests executed (this session)
+## Session 2 — pre-merge review & hardening
+- **Secrets:** no API keys, tokens, private keys or real credentials are tracked (`.env` is git-ignored; only `.env.example` placeholders). Production client bundle scanned: no secrets, no demo password.
+- **Demo credentials:** the demo password is no longer compiled into the client bundle (rendered server-side only when demo login is on). New `demoLoginEnabled()` (`src/lib/auth/demo.ts`): demo login is ignored in production builds unless `ALLOW_DEMO_LOGIN_IN_PRODUCTION=true` is also set — verified against `next start` with `ENABLE_DEMO_LOGIN=true` (no demo accounts offered).
+- **Seed safety:** `db:seed` now refuses to TRUNCATE a database that contains non-demo user accounts unless `SEED_FORCE_RESET=true` (verified on a scratch DB).
+- **Login hardening:** constant-time-ish bcrypt for unknown accounts, extra per-account rate limit, stricter `next` redirect guard (`src/lib/auth/redirect.ts`, rejects `/\host` and control chars).
+- **Audit CSV** export escapes spreadsheet formulae.
+- **docker-compose** now requires `POSTGRES_PASSWORD` (no weak default).
+- **zod 3.25 → 4.6.7** (GHSA memory-exhaustion advisory affecting server-action validation); two `z.record` call sites and one coerce input type adjusted.
+- **Lint** run for the first time: 4 unused-variable warnings fixed → clean.
+- **Migrations** verified: `prisma migrate diff --from-migrations … --to-schema-datamodel` → no difference.
+
+## Tests executed (session 2, after the changes above)
+| Suite | Result |
+|---|---|
+| `npm run lint` | ✔ no warnings or errors |
+| `npm run typecheck` | clean |
+| `npm run test:unit` | **83 / 83** (adds 14 auth-guard tests) |
+| `npm run test:integration` | **11 / 11** |
+| `npm run test:e2e` (desktop + mobile) | **6 / 6** |
+| `npm run build` | successful, 47 routes (one transient Google Fonts fetch failure on first attempt — build needs network to fonts.googleapis.com) |
+| `pytest services/optimizer` | **3 / 3** |
+| `npm audit --omit=dev` | 7 remaining (prisma CLI → deepmerge-ts, next → postcss build-time, exceljs → uuid); all need major upgrades (prisma 7, next 16) — tracked, not runtime-exploitable in current usage |
+
+## Tests executed (session 1)
 | Suite | Command | Result |
 |---|---|---|
 | Unit (engines, AI rules) | `npm run test:unit` | **69 / 69 passed** |
@@ -50,7 +73,9 @@ The MVP workflow (spec §38) is implemented and verified end-to-end through the 
 - Arabic: navigation, header, statuses and common UI are translated with full RTL; most page-level descriptive copy and table headers are still English. PDF exports use standard Latin fonts (Arabic text would render as "?").
 - Engines assume Cairo = UTC+2 (`timezoneOffsetHours`); Egypt's summer DST (UTC+3) is not modelled in scheduling calendars.
 - S3 storage driver is an interface only (refuses to run); use the local volume.
-- Rate limiting is in-memory per process.
+- Rate limiting is in-memory per process; the IP key trusts `X-Forwarded-For`, so deploy behind a proxy that overwrites it.
+- No Content-Security-Policy / HSTS header yet (X-Frame-Options, nosniff and Referrer-Policy are set); add CSP with nonces and HSTS at the proxy.
+- `next build` downloads Google Fonts; offline/air-gapped Docker builds need self-hosted fonts.
 - Image/vision extraction is not implemented (images are stored; no values extracted).
 - Change requests support item dimensions/quantity, participants, budget, dates, vehicle availability and AV quantities; component lists are scaled proportionally and flagged "revised drawing required".
 - OR-Tools service works in continuous working minutes (no calendar gaps) and is advisory only.
@@ -61,9 +86,10 @@ The MVP workflow (spec §38) is implemented and verified end-to-end through the 
 1. **Next task:** load real Paradigm libraries via Knowledge Base → Import and approve standards; confirm the logo variant with Marketing.
 2. Complete Arabic copy for page bodies; embed an Arabic font in PDF exports.
 3. Exercise and harden the Claude path with a real `ANTHROPIC_API_KEY` (extraction quality evaluation set).
-4. CI pipeline (GitHub Actions: typecheck, unit, integration with Postgres service, E2E).
-5. S3 driver, shared rate-limit store, DST-aware calendars.
-6. Inline library editors; vision extraction; calendar-aware OR-Tools model selectable from Master Planning.
+4. CI pipeline (GitHub Actions: lint, typecheck, unit, integration with Postgres service, E2E). Create the `main` branch (repository currently has none).
+5. Upgrade Prisma 7 / Next 16 to clear remaining `npm audit` advisories; add CSP + HSTS; run `docker build` once a daemon is available.
+6. S3 driver, shared rate-limit store, DST-aware calendars.
+7. Inline library editors; vision extraction; calendar-aware OR-Tools model selectable from Master Planning.
 
 ## How to resume
 ```bash

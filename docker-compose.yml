@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: eventops
       POSTGRES_USER: eventops
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventops_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U eventops"], interval: 10s, timeout: 5s, retries: 10 }
     ports: ["127.0.0.1:5432:5432"]
@@ -17,7 +17,7 @@ services:
     depends_on: { db: { condition: service_healthy } }
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://eventops:${POSTGRES_PASSWORD:-eventops_dev}@db:5432/eventops?schema=public
+      DATABASE_URL: postgresql://eventops:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/eventops?schema=public
       STORAGE_LOCAL_DIR: /app/storage/uploads
       OPTIMIZER_URL: ${OPTIMIZER_URL:-}
     volumes: [uploads:/app/storage/uploads]
