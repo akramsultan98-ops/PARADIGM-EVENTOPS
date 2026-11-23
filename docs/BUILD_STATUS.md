@@ -1,6 +1,25 @@
 # Build status — PARADIGM EVENTOPS
 
-_Last updated: 2026-11-19 (session 3 — security remediation sprint on PR #2). Read this first when resuming work._
+_Last updated: 2026-11-24 (session 4 — Akram Brain: persistent memory & learning engine). Read this first when resuming work; Brain context lives in `docs/brain/PROJECT_STATE.md`._
+
+## Session 4 — Akram Brain memory engine (branch `claude/akram-brain-memory`)
+| Area | State |
+|---|---|
+| Schema: `BrainMemory`, `BrainMemoryVersion`, `BrainMemoryApplication` + 5 enums; migration `20261124010000_brain_memory` | ✅ applied to PostgreSQL 16 and exercised by tests (hand-written SQL — confirm with `prisma migrate diff`, see PROJECT_STATE) |
+| Pure engine `src/brain/*` (extract, recall, conflicts) + `src/engines/quotation.ts` | ✅ unit tested (13) |
+| Service `src/server/services/brain.ts` (propose / decide / correct / revoke / share / recall / record) + `brain-quotation.ts` | ✅ integration tested (7) |
+| Assistant: "Remember…" → proposals; tool `recall_memories` with recorded use | ✅ type-checked; AI path still not exercised (no key) |
+| `/brain` Memory & Learning Center, nav item, permission `brain.use` (AM, PM, Super Admin) | ✅ type-checked + lint; **not rendered** here |
+
+### Tests executed (session 4)
+| Suite | Result |
+|---|---|
+| `npm run lint` / `npm run typecheck` | clean / clean |
+| `npm run test:unit` | **125 / 125** |
+| integration (PostgreSQL 16) | **103 / 103** — run through Prisma's WASM query compiler + `@prisma/adapter-pg` and SQL-applied migrations, because Prisma's native engine download (binaries.prisma.sh) is blocked in the build sandbox. Repository code and config are unchanged; run `npm run test:integration` normally on your machine/CI |
+| Mutations (each reverted afterwards) | assumption guard removed → 1 fail · personal workspace not owner-scoped → 1 fail · conflict auto-accepted → 1 fail · approval filter removed in DB **and** `isUsable` → 4 fail (removing only one layer is caught by the other — defence in depth) |
+| `npm run build` | **not run to completion** — fonts.googleapis.com blocked in the sandbox (known build dependency) |
+
 
 ## Summary
 The MVP workflow (spec §38) is implemented and verified end-to-end through the real UI by an automated Playwright test. The application is a working Next.js 15 + PostgreSQL/Prisma platform with deterministic planning engines, role-based workspaces, approvals, execution tracking and exports. Demo data is connected and clearly labelled.
