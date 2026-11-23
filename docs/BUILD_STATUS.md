@@ -18,7 +18,7 @@ _Last updated: 2026-11-24 (session 4 — Akram Brain: persistent memory & learni
 | `npm run test:unit` | **125 / 125** |
 | integration (PostgreSQL 16) | **103 / 103** — run through Prisma's WASM query compiler + `@prisma/adapter-pg` and SQL-applied migrations, because Prisma's native engine download (binaries.prisma.sh) is blocked in the build sandbox. Repository code and config are unchanged; run `npm run test:integration` normally on your machine/CI |
 | Mutations (each reverted afterwards) | assumption guard removed → 1 fail · personal workspace not owner-scoped → 1 fail · conflict auto-accepted → 1 fail · approval filter removed in DB **and** `isUsable` → 4 fail (removing only one layer is caught by the other — defence in depth) |
-| `npm run build` | **not run to completion** — fonts.googleapis.com blocked in the sandbox (known build dependency) |
+| `npm run build` | blocked in the sandbox (fonts.googleapis.com); **passes on Vercel** — preview deployment of `7de772a` READY. `/brain` not yet visually checked |
 
 
 ## Summary

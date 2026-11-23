@@ -27,7 +27,7 @@ Update at the end of every working session (newest first).
 
 ## Known issues
 - Migration SQL was written by hand (Prisma's schema engine could not be downloaded in the build sandbox). It was applied to PostgreSQL 16 and exercised by every new test, but run `npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url <scratch-db>` once to confirm zero drift.
-- `next build` was not run in the sandbox (Google Fonts blocked); `/brain` page type-checks and lints but was not rendered.
+- `next build` passes on Vercel (preview of `7de772a` READY); `/brain` has not been visually checked yet.
 
 ## Next actions
 1. Akram: decisions 1–5; review the PR.
