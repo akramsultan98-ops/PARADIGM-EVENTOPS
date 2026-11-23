@@ -321,6 +321,7 @@ model Company {
   exchangeRates  ExchangeRate[]
   routeEstimates RouteEstimate[]
   historical     HistoricalEvent[]
+  brainMemories  BrainMemory[]
 }
 
 model Role {
@@ -408,6 +409,7 @@ model User {
   accommodation    AccommodationAssignment[]
   uploads          UploadedDocument[]
   riskOwnerships   Risk[]
+  brainMemories    BrainMemory[]
 
   @@index([companyId])
 }
@@ -1606,4 +1608,126 @@ model HistoricalEvent {
   isDemo         Boolean   @default(false)
   createdAt      DateTime  @default(now())
   company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────────── Akram Brain: persistent memory & learning ─────────────────────────────
+// Memories are proposed from explicit instructions, corrections and approved decisions; nothing is used
+// until a person approves it. Every change is versioned, every use is recorded (which memory, which version,
+// in which session) so answers can show what influenced them. See docs/brain/MEMORY_ENGINE.md.
+
+enum BrainWorkspace {
+  PARADIGM
+  PERSONAL
+  DEVELOPMENT
+}
+
+enum MemoryCategory {
+  WORKING_PREFERENCE
+  PROFESSIONAL_KNOWLEDGE
+  OPERATIONAL_RULE
+  CLIENT_KNOWLEDGE
+  VENDOR_KNOWLEDGE
+  EVENT_HISTORY
+  COMMUNICATION_PREFERENCE
+  DECISION_LESSON
+  PROCEDURE
+  ACTIVE_CONTEXT
+}
+
+enum MemoryKind {
+  FACT
+  RULE
+  PREFERENCE
+  ASSUMPTION
+  SUGGESTION
+}
+
+enum MemoryApproval {
+  PROPOSED
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+enum MemoryValidity {
+  ACTIVE
+  CONFLICTED
+  SUPERSEDED
+  EXPIRED
+}
+
+model BrainMemory {
+  id              String         @id @default(cuid())
+  companyId       String
+  workspace       BrainWorkspace
+  ownerUserId     String
+  /// visible to other company users (PARADIGM workspace only; sharing needs standards.approve)
+  shared          Boolean        @default(false)
+  category        MemoryCategory
+  kind            MemoryKind
+  title           String
+  content         String
+  /// structured, deterministic rule (e.g. {"type":"margin_percent","value":15}); null = narrative memory
+  rule            Json?
+  /// where it applies (e.g. {"sector":"UN"}); empty = everywhere in the workspace
+  scope           Json?
+  keywords        String[]
+  sourceType      String // INSTRUCTION | CORRECTION | DECISION | DOCUMENT | WORKFLOW
+  sourceRef       String?
+  /// exact words from the source that justify the memory
+  evidence        String
+  confidence      Float
+  approval        MemoryApproval @default(PROPOSED)
+  validity        MemoryValidity @default(ACTIVE)
+  version         Int            @default(1)
+  conflictWithId  String?
+  supersedesId    String?
+  approvedById    String?
+  approvedAt      DateTime?
+  lastValidatedAt DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  company      Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner        User                     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  versions     BrainMemoryVersion[]
+  applications BrainMemoryApplication[]
+
+  @@index([companyId, workspace, approval, validity])
+  @@index([ownerUserId])
+}
+
+model BrainMemoryVersion {
+  id          String      @id @default(cuid())
+  memoryId    String
+  version     Int
+  kind        MemoryKind
+  title       String
+  content     String
+  rule        Json?
+  scope       Json?
+  changedById String
+  reason      String
+  createdAt   DateTime    @default(now())
+  memory      BrainMemory @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+
+  @@unique([memoryId, version])
+}
+
+model BrainMemoryApplication {
+  id            String      @id @default(cuid())
+  memoryId      String
+  memoryVersion Int
+  companyId     String
+  userId        String
+  sessionId     String
+  contextType   String // QUOTATION_DRAFT | ASSISTANT | ...
+  contextRef    String?
+  effect        Json
+  createdAt     DateTime    @default(now())
+  memory        BrainMemory @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+
+  @@index([memoryId])
+  @@index([companyId, sessionId])
 }

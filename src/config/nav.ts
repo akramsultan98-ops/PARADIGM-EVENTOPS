@@ -19,6 +19,7 @@ export function buildNav(u: AuthUser, t: Dict, counts: { approvals: number; noti
         { key: "tasks", href: "/tasks", icon: "tasks", label: t.nav.myTasks, badge: counts.tasks || undefined },
         ...(has("submission.review") || has("plan.approve") || has("budget.approve") || has("procurement.approve") || has("standards.approve") ? [{ key: "approvals", href: "/approvals", icon: "approvals" as const, label: t.nav.approvals, badge: counts.approvals || undefined }] : []),
         ...(has("ai.use") ? [{ key: "assistant", href: "/assistant", icon: "ai" as const, label: t.nav.assistant }] : []),
+        ...(has("brain.use") ? [{ key: "brain", href: "/brain", icon: "knowledge" as const, label: t.nav.brain }] : []),
       ],
     },
     {

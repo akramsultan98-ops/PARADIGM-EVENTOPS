@@ -10,6 +10,10 @@ import { compareImpact } from "@/engines/impact";
 import { runPlanningPipeline } from "@/engines/pipeline";
 import { buildSnapshot } from "@/server/services/snapshot";
 import { getProvider, FALLBACK_BETA, MODEL } from "./provider";
+import { randomUUID } from "node:crypto";
+import { hasLearningIntent } from "@/brain/extract";
+import { situationFrom } from "@/brain/recall";
+import { proposeMemories, recallMemories, recordApplications } from "@/server/services/brain";
 
 /**
  * AI Project Orchestrator (spec §16).
@@ -28,7 +32,7 @@ async function loadPlan(projectId: string): Promise<{ plan: PlanResult; version:
   return v ? { plan: v.snapshot as unknown as PlanResult, version: v.version, status: v.status } : null;
 }
 
-function toolsFor(u: AuthUser) {
+function toolsFor(u: AuthUser, sessionId: string = randomUUID()) {
   const scope = projectScope(u);
   const fin = canReadFinancials(u);
   // every plan the assistant can see is redacted for users without budget.read (P1-2)
@@ -86,12 +90,20 @@ function toolsFor(u: AuthUser) {
       const impact = fin ? compareImpact(base, runPlanningPipeline(snapshot)) : redactImpact(compareImpact(base, runPlanningPipeline(snapshot)));
       return { assumptions, notes, summary: impact.summary, domains: impact.domains.filter((d) => d.changed).map((d) => ({ domain: d.domain, deltas: d.deltas, notes: d.notes })), newIssues: impact.newIssues.slice(0, 10), approvalsRequired: impact.approvalsRequired, note: "Simulation only — the approved plan was not changed." };
     },
+    recall_memories: async (a) => {
+      if (!u.permissions.has("brain.use")) return "Memory requires the brain.use permission.";
+      const ranked = await recallMemories(u, "PARADIGM", situationFrom(String(a.question ?? ""), { client: a.client ? String(a.client) : null }));
+      const top = ranked.slice(0, 12);
+      await recordApplications(u, { sessionId, contextType: "ASSISTANT", influences: top.map((r) => ({ memoryId: r.memory.id, version: r.memory.version, title: r.memory.title, evidence: r.memory.evidence, effect: "provided to the assistant as approved context" })) });
+      return { approvedMemories: top.map((r) => ({ id: r.memory.id, version: r.memory.version, category: r.memory.category, kind: r.memory.kind, title: r.memory.title, content: r.memory.content, evidence: r.memory.evidence, whyRelevant: r.reasons })) };
+    },
   };
   const defs: Anthropic.Beta.BetaTool[] = [
     { name: "list_projects", description: "List projects the current user can access (id, code, name, status, event date).", input_schema: { type: "object", properties: {}, additionalProperties: false }, strict: true },
     { name: "get_project_overview", description: "Project details, department submission status and latest plan readiness.", input_schema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"], additionalProperties: false }, strict: true },
     { name: "list_open_issues", description: "Open validation errors, warnings and missing-information questions from the latest calculated plan, optionally filtered by department key (PRODUCTION, AV, LOGISTICS, ACCOMMODATION, CREATIVE, PROCUREMENT, FINANCE, PMO).", input_schema: { type: "object", properties: { projectId: { type: "string" }, department: { type: "string" } }, required: ["projectId"], additionalProperties: false } },
     { name: "get_plan_section", description: "Calculated plan data from the deterministic engines. section ∈ boq | manpower | av | transport | accommodation | budget | schedule | risks.", input_schema: { type: "object", properties: { projectId: { type: "string" }, section: { type: "string", enum: ["boq", "manpower", "av", "transport", "accommodation", "budget", "schedule", "risks"] } }, required: ["projectId", "section"], additionalProperties: false }, strict: true },
+    { name: "recall_memories", description: "Approved memories the user taught (pricing and commercial rules, client and vendor knowledge, communication preferences, lessons). Only APPROVED memories are returned; cite their ids when you use them.", input_schema: { type: "object", properties: { question: { type: "string" }, client: { type: "string" } }, required: ["question"], additionalProperties: false } },
     { name: "run_what_if", description: "Run a what-if simulation on a copy of the plan (never changes the approved plan). Pass the user's scenario question in plain language.", input_schema: { type: "object", properties: { projectId: { type: "string" }, question: { type: "string" } }, required: ["projectId", "question"], additionalProperties: false }, strict: true },
   ];
   return { impl, defs };
@@ -104,9 +116,18 @@ Rules:
 - Quantities come from deterministic engines; you explain and coordinate, you do not replace them.
 - Distinguish CALCULATED, ESTIMATED and NEEDS_INFORMATION values. A calculation is not an engineering approval.
 - What-if results are simulations; never claim the approved plan changed.
-- Be concise and operational: bullets, owners, next actions. Answer in the user's language (English or Arabic).`;
+- Be concise and operational: bullets, owners, next actions. Answer in the user's language (English or Arabic).
+- For questions about pricing, clients, vendors or how the user works, call recall_memories first. Cite the memory ids you relied on. Only approved memories are knowledge; never present your own assumptions as remembered rules.`;
 
 export async function assistantRespond(u: AuthUser, projectId: string | null, history: AssistantTurn[], message: string): Promise<AssistantReply> {
+  // "Remember…" / "From now on…" → memory PROPOSALS (deterministic, no LLM); nothing is used before approval
+  if (u.permissions.has("brain.use") && hasLearningIntent(message) && !message.trim().endsWith("?")) {
+    const created = await proposeMemories(u, { workspace: "PARADIGM", text: message, sourceType: "INSTRUCTION", sourceRef: projectId ? `project:${projectId}` : null });
+    if (created.length) {
+      const lines = created.map((c) => `- **${c.title}** _(${c.kind.toLowerCase()}, ${c.category.toLowerCase().replace(/_/g, " ")})_${c.validity === "CONFLICTED" ? " — ⚠ contradicts an approved memory; you must decide which one is valid" : ""}\n  ↳ evidence: “${c.evidence}”`);
+      return { text: `I prepared ${created.length} memory proposal(s). They are **not used until you approve them** in Memory & Learning (/brain):\n${lines.join("\n")}`, engine: "RULE_BASED", toolsUsed: ["propose_memories"], sources: created.map((c) => `memory:${c.id}`) };
+    }
+  }
   const provider = getProvider();
   const { impl, defs } = toolsFor(u);
   if (!provider) return ruleBased(u, projectId, message, impl);

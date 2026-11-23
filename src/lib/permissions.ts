@@ -30,6 +30,7 @@ export const PERMISSIONS = {
   "vendors.manage": "Manage vendors",
   "knowledge.manage": "Manage the knowledge base and imports",
   "audit.read": "View audit history",
+  "brain.use": "Use Akram Brain memory: teach, approve, correct and revoke your own memories",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -39,8 +40,8 @@ const DEPT_MANAGER: Permission[] = ["project.read", "submission.create", "submis
 
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
-  PROJECT_MANAGER: ["project.read", "project.create", "project.edit", "project.assign", "submission.create", "submission.submit", "plan.generate", "plan.review", "plan.approve", "schedule.edit", "budget.read", "procurement.manage", "execution.update", "risk.manage", "export.run", "documents.upload", "ai.use", "standards.manage", "audit.read"],
-  ACCOUNT_MANAGER: ["project.read", "project.create", "project.edit", "submission.create", "submission.submit", "documents.upload", "ai.use", "export.run", "budget.read"],
+  PROJECT_MANAGER: ["project.read", "project.create", "project.edit", "project.assign", "submission.create", "submission.submit", "plan.generate", "plan.review", "plan.approve", "schedule.edit", "budget.read", "procurement.manage", "execution.update", "risk.manage", "export.run", "documents.upload", "ai.use", "standards.manage", "audit.read", "brain.use"],
+  ACCOUNT_MANAGER: ["project.read", "project.create", "project.edit", "submission.create", "submission.submit", "documents.upload", "ai.use", "export.run", "budget.read", "brain.use"],
   PRODUCTION_MANAGER: [...DEPT_MANAGER, "standards.manage"],
   AV_MANAGER: [...DEPT_MANAGER, "standards.manage"],
   LOGISTICS_MANAGER: [...DEPT_MANAGER, "standards.manage"],
